@@ -1680,10 +1680,10 @@ body {
 }
 
 .preview-transform {
-  width: 1080px;
-  height: 608px;
-  margin-left: -540px;
-  margin-top: -304px;
+  width: 900px;
+  height: 506px;
+  margin-left: -450px;
+  margin-top: -253px;
 }
 
 .viewport-editable {
@@ -1790,10 +1790,10 @@ body {
   }
 
   .preview-transform {
-    width: 960px;
-    height: 540px;
-    margin-left: -480px;
-    margin-top: -270px;
+    width: 820px;
+    height: 461px;
+    margin-left: -410px;
+    margin-top: -230px;
   }
 
   .preset-grid-24 {
