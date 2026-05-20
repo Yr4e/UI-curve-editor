@@ -2,7 +2,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const source = path.resolve(
-  'C:/Users/yr4e/Desktop/inputlag assets/06_InputLag_Versions/Source_Projects/inputlag.ai-main_old_render_project/renderer/dist',
+  'C:/Users/yr4e/inputlag.ai-main/renderer/dist',
 )
 const target = path.resolve(__dirname, '..', 'public', 'inputlag-preview')
 

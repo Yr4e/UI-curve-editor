@@ -4,21 +4,18 @@ import {
   ChevronUp,
   Code2,
   Download,
-  ExternalLink,
-  FolderOpen,
   Pause,
   Play,
   Plus,
   Rotate3D,
   SlidersHorizontal,
   Sparkles,
+  Trash2,
   X,
 } from 'lucide-react'
 import { pages, presetTemplates } from './data/presets.js'
 
-const inputLagPreviewUrl = window.location.protocol === 'file:'
-  ? './inputlag-preview/index.html'
-  : 'http://127.0.0.1:5173/'
+const inputLagPreviewUrl = './inputlag-preview/index.html'
 
 const defaultTransform = {
   x: 0,
@@ -45,6 +42,7 @@ const curvePresets = [
   { id: 'rebound-out', label: 'Rebound Out', curve: [0.2, 1.32, 0.62, 0.86], path: 'M18 112 C64 -22 158 52 242 18' },
 ]
 
+const presetTabs = ['Start', 'End', 'Effects']
 const presetGrid = Array.from({ length: 24 }, (_, index) => {
   const template = presetTemplates[index % presetTemplates.length]
   return {
@@ -58,6 +56,8 @@ const presetGrid = Array.from({ length: 24 }, (_, index) => {
 const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, value))
 const pageLabel = (id) => pages.find((page) => page.id === id)?.label ?? id
 const curveById = (id) => curvePresets.find((curve) => curve.id === id) ?? curvePresets[1]
+const sortedKeyframes = (project) => [...project.windowTrack.keyframes].sort((a, b) => a.time - b.time)
+const sortedActions = (project) => [...project.actionTrack.actions].sort((a, b) => a.time - b.time)
 
 const estimateWeight = (duration, fps) => {
   const frames = Math.round(duration * fps)
@@ -66,34 +66,40 @@ const estimateWeight = (duration, fps) => {
 
 const makeProject = ({ name = 'InputLag Project', duration = 6, presetId = 'empty' } = {}) => {
   const preset = presetTemplates.find((item) => item.id === presetId)
-  if (!preset) {
-    return {
-      name,
-      duration,
-      fps: 60,
-      speed: 1,
-      page: 'boost',
-      sourceUrl: inputLagPreviewUrl,
-      sourceName: 'InputLag renderer preview',
-      sourceFiles: 0,
-      baseTransform: { ...defaultTransform },
-      keyframes: [],
-    }
-  }
-
+  const base = preset ? { ...preset.start, scale: Math.max(preset.start.scale, 0.86) } : { ...defaultTransform }
   return {
     name,
-    duration: preset.duration,
-    fps: preset.fps,
-    speed: preset.speed,
-    page: preset.page,
+    duration: preset?.duration ?? duration,
+    fps: preset?.fps ?? 60,
+    speed: preset?.speed ?? 1,
+    page: preset?.page ?? 'boost',
     sourceUrl: inputLagPreviewUrl,
-    sourceName: 'InputLag renderer preview',
+    sourceName: 'C:/Users/yr4e/inputlag.ai-main/renderer',
     sourceFiles: 0,
-    baseTransform: { ...preset.start, scale: Math.max(preset.start.scale, 0.86) },
-    keyframes: [
-      { id: crypto.randomUUID(), time: Number(preset.duration.toFixed(2)), transform: { ...preset.end, scale: Math.max(preset.end.scale, 0.86) }, curvePreset: 'ease' },
-    ],
+    baseTransform: base,
+    windowTrack: {
+      name: 'Window',
+      keyframes: preset
+        ? [{
+            id: crypto.randomUUID(),
+            time: Number(preset.duration.toFixed(2)),
+            transform: { ...preset.end, scale: Math.max(preset.end.scale, 0.86) },
+            curvePreset: 'ease',
+            preset: preset.id,
+          }]
+        : [],
+    },
+    actionTrack: {
+      name: 'Action',
+      actions: preset?.actions?.map((action) => ({
+        id: crypto.randomUUID(),
+        time: Number(Math.min(action.at ?? 0, preset.duration).toFixed(2)),
+        duration: 0.45,
+        type: action.type,
+        label: action.label,
+        preset: preset.id,
+      })) ?? [],
+    },
   }
 }
 
@@ -105,73 +111,55 @@ const bezierY = (progress, curve) => {
 
 const interpolateTransform = (from, to, progress, curveId) => {
   const eased = bezierY(progress, curveById(curveId).curve)
-  const next = {}
-  Object.keys(defaultTransform).forEach((key) => {
+  return Object.fromEntries(Object.keys(defaultTransform).map((key) => {
     const value = from[key] + (to[key] - from[key]) * eased
-    next[key] = Number(value.toFixed(key === 'scale' ? 3 : 1))
-  })
-  return next
+    return [key, Number(value.toFixed(key === 'scale' ? 3 : 1))]
+  }))
 }
-
-const sortedKeyframes = (project) => [...project.keyframes].sort((a, b) => a.time - b.time)
 
 const getTransformAtTime = (project, time) => {
   const keyframes = sortedKeyframes(project)
   if (!keyframes.length) return project.baseTransform
   const first = keyframes[0]
-  if (first.time <= 0.001 && time <= 0.001) return first.transform
   if (time <= first.time) {
-    const span = Math.max(first.time, 0.001)
-    return interpolateTransform(project.baseTransform, first.transform, time / span, first.curvePreset)
+    return interpolateTransform(project.baseTransform, first.transform, time / Math.max(first.time, 0.001), first.curvePreset)
   }
   for (let index = 1; index < keyframes.length; index += 1) {
     const prev = keyframes[index - 1]
     const next = keyframes[index]
     if (time <= next.time) {
-      const span = Math.max(next.time - prev.time, 0.001)
-      return interpolateTransform(prev.transform, next.transform, (time - prev.time) / span, next.curvePreset)
+      return interpolateTransform(prev.transform, next.transform, (time - prev.time) / Math.max(next.time - prev.time, 0.001), next.curvePreset)
     }
   }
   return keyframes[keyframes.length - 1].transform
 }
 
-const getSegmentForTime = (project, time) => {
+const getSegmentForTime = (project, time, selectedKeyframeId) => {
   const keyframes = sortedKeyframes(project)
   if (!keyframes.length) return null
-  const first = keyframes[0]
-  if (time <= first.time) return { fromTime: 0, toTime: first.time, keyframe: first }
-  for (let index = 1; index < keyframes.length; index += 1) {
-    const prev = keyframes[index - 1]
-    const next = keyframes[index]
-    if (time <= next.time) return { fromTime: prev.time, toTime: next.time, keyframe: next }
+  const selected = selectedKeyframeId
+    ? keyframes.find((keyframe) => keyframe.id === selectedKeyframeId)
+    : keyframes.find((keyframe) => time <= keyframe.time) ?? keyframes[keyframes.length - 1]
+  if (!selected) return null
+  const index = keyframes.findIndex((keyframe) => keyframe.id === selected.id)
+  return {
+    fromTime: index > 0 ? keyframes[index - 1].time : 0,
+    toTime: selected.time,
+    keyframe: selected,
   }
-  const last = keyframes[keyframes.length - 1]
-  return { fromTime: last.time, toTime: project.duration, keyframe: last, hold: true }
 }
 
-function SourceBinder({ project, onBind }) {
-  const fileInputRef = useRef(null)
-
-  const handleFiles = (event) => {
-    const files = Array.from(event.target.files || [])
-    if (!files.length) return
-    const html = files.find((file) => file.name.toLowerCase().endsWith('.html'))
-    const projectName = files[0].webkitRelativePath?.split('/')?.[0] || files[0].name
-    onBind({
-      sourceName: html ? html.name : projectName,
-      sourceFiles: files.length,
-      sourceUrl: html ? URL.createObjectURL(html) : project.sourceUrl,
-    })
-  }
-
+function ProjectMeta({ project }) {
+  const weight = estimateWeight(project.duration, project.fps)
   return (
-    <section className="source-inline">
-      <span className="source-dot live" />
-      <strong>{project.sourceName}</strong>
-      <small>{project.sourceFiles ? `${project.sourceFiles} files` : 'local preview'}</small>
-      <button onClick={() => fileInputRef.current?.click()}><FolderOpen size={14} /> Bind</button>
-      <input ref={fileInputRef} type="file" multiple webkitdirectory="true" directory="true" onChange={handleFiles} hidden />
-    </section>
+    <div className="header-meta">
+      <span>{pageLabel(project.page)}</span>
+      <span>{project.fps} FPS</span>
+      <span>{project.duration.toFixed(2)}s</span>
+      <span>{weight.frames} frames</span>
+      <span>~{weight.movMb}MB</span>
+      <span className="source-path">{project.sourceName}</span>
+    </div>
   )
 }
 
@@ -188,14 +176,8 @@ function NewProjectModal({ open, onClose, onCreate }) {
           <span>Create new</span>
           <strong>Project setup</strong>
         </div>
-        <label>
-          Project name
-          <input value={name} onChange={(event) => setName(event.target.value)} />
-        </label>
-        <label>
-          Length, seconds
-          <input type="number" min="1" max="90" step="0.1" value={duration} onChange={(event) => setDuration(Number(event.target.value))} />
-        </label>
+        <label>Project name<input value={name} onChange={(event) => setName(event.target.value)} /></label>
+        <label>Length, seconds<input type="number" min="1" max="90" step="0.1" value={duration} onChange={(event) => setDuration(Number(event.target.value))} /></label>
         <label>
           Starting preset
           <select value={presetId} onChange={(event) => setPresetId(event.target.value)}>
@@ -227,10 +209,12 @@ function InputLagWindow({ project, page }) {
   }
   const source = project.sourceUrl || inputLagPreviewUrl
   const sourceIsHtml = source.toLowerCase().includes('.html')
-  const cleanSource = source.startsWith('blob:') || sourceIsHtml ? source.replace(/[?#].*$/, '') : source.replace(/[?#].*$/, '').replace(/\/?$/, '/')
+  const cleanSource = source.startsWith('blob:') || sourceIsHtml
+    ? source.replace(/[?#].*$/, '')
+    : source.replace(/[?#].*$/, '').replace(/\/?$/, '/')
   const pageUrl = source.startsWith('blob:')
     ? source
-    : `${cleanSource}${sourceIsHtml ? '' : ''}?renderCapture=boost-ai&studioPreview=1&page=${renderPageMap[page] ?? 'boost'}#${routeMap[page] ?? '/center'}`
+    : `${cleanSource}?renderCapture=boost-ai&studioPreview=1&page=${renderPageMap[page] ?? 'boost'}#${routeMap[page] ?? '/center'}`
 
   return (
     <div className="preview-shell">
@@ -256,7 +240,15 @@ function PresetMiniPreview({ preset }) {
   )
 }
 
-function PresetBrowserModal({ open, onClose, onLoad }) {
+function PresetBrowserModal({ open, onClose, onAdd }) {
+  const [activeTab, setActiveTab] = useState('Start')
+  const [selected, setSelected] = useState(presetGrid[0])
+  const visiblePresets = activeTab === 'Effects'
+    ? presetGrid.filter((preset) => preset.tag === 'text' || preset.page === 'logo')
+    : activeTab === 'End'
+      ? presetGrid.filter((preset) => preset.tag !== 'text')
+      : presetGrid
+
   if (!open) return null
   return (
     <div className="modal-backdrop">
@@ -264,147 +256,154 @@ function PresetBrowserModal({ open, onClose, onLoad }) {
         <div className="preset-browser-head">
           <div>
             <span>Ready presets</span>
-            <strong>Pick animation template</strong>
+            <strong>{activeTab} templates</strong>
           </div>
           <button onClick={onClose}><X size={16} /></button>
         </div>
+        <div className="preset-tabs">
+          {presetTabs.map((tab) => (
+            <button key={tab} className={activeTab === tab ? 'active' : ''} onClick={() => setActiveTab(tab)}>{tab}</button>
+          ))}
+        </div>
         <div className="preset-grid-24">
-          <button className="preset-tile empty-tile" onClick={() => { onLoad(null); onClose() }}>
-            <Plus size={22} />
-            <span>No preset</span>
-          </button>
-          {presetGrid.slice(0, 23).map((preset) => (
+          {visiblePresets.slice(0, 24).map((preset) => (
             <button
-              className="preset-tile"
-              key={preset.id}
-              onClick={() => { onLoad(preset); onClose() }}
+              className={selected?.id === preset.id ? 'preset-tile active' : 'preset-tile'}
+              key={`${activeTab}-${preset.id}`}
+              onClick={() => setSelected(preset)}
             >
               <PresetMiniPreview preset={preset} />
               <span>{preset.name}</span>
             </button>
           ))}
         </div>
+        <div className="preset-browser-footer">
+          <span>{selected ? `${selected.name} -> current playhead` : 'Select preset'}</span>
+          <button disabled={!selected} onClick={() => { onAdd(selected, activeTab.toLowerCase()); onClose() }}>
+            <Plus size={16} /> Add to current timeline
+          </button>
+        </div>
       </div>
     </div>
   )
 }
 
-function CodePanel({ project }) {
+function CodePanel({ project, playhead, onClose }) {
   const outputCode = {
-    project: project.name,
-    page: project.page,
-    duration: project.duration,
-    fps: project.fps,
-    source: project.sourceName,
-    baseTransform: project.baseTransform,
-    keyframes: sortedKeyframes(project).map((keyframe) => ({
-      time: keyframe.time,
-      curve: keyframe.curvePreset,
-      transform: keyframe.transform,
-    })),
+    project: {
+      name: project.name,
+      page: project.page,
+      duration: project.duration,
+      fps: project.fps,
+      speed: project.speed,
+      source: project.sourceName,
+      currentTime: Number(playhead.toFixed(3)),
+      range: { from: 0, to: project.duration },
+    },
+    tracks: {
+      window: {
+        baseTransform: project.baseTransform,
+        keyframes: sortedKeyframes(project).map((keyframe) => ({
+          id: keyframe.id,
+          time: keyframe.time,
+          curve: keyframe.curvePreset,
+          preset: keyframe.preset ?? null,
+          transform: keyframe.transform,
+        })),
+      },
+      action: {
+        actions: sortedActions(project).map((action) => ({
+          id: action.id,
+          time: action.time,
+          duration: action.duration,
+          type: action.type,
+          label: action.label,
+          preset: action.preset ?? null,
+          category: action.category ?? 'app',
+        })),
+      },
+    },
+    render: {
+      mov: 'phase-2',
+      frames: estimateWeight(project.duration, project.fps).frames,
+      effects: sortedActions(project).filter((action) => action.category === 'effects'),
+    },
   }
 
   return (
-    <div className="left-code-panel">
-      <strong>Output code</strong>
+    <div className="code-drawer">
+      <div className="code-drawer-head">
+        <strong>Output code</strong>
+        <button onClick={onClose}><X size={16} /></button>
+      </div>
       <pre>{JSON.stringify(outputCode, null, 2)}</pre>
     </div>
   )
 }
 
-function BoxPanel() {
-  return (
-    <div className="left-code-panel">
-      <strong>Box</strong>
-      <p>Ready loops will live here later. Bottom panel removed.</p>
-    </div>
-  )
-}
-
-function PresetPanel({ project, onOpen }) {
-  const [leftMode, setLeftMode] = useState(null)
-
-  return (
-    <aside className="preset-library compact-presets">
-      <div className="panel-title">
-        <Sparkles size={18} />
-        <div>
-          <span>Left panel</span>
-          <strong>Presets</strong>
-        </div>
-      </div>
-      <button className="ready-presets-button" onClick={onOpen}>
-        <Sparkles size={18} />
-        <span>Ready presets</span>
-      </button>
-      <div className="left-button-stack">
-        <button className={leftMode === 'code' ? 'left-mode active' : 'left-mode'} onClick={() => setLeftMode(leftMode === 'code' ? null : 'code')}>
-          <Code2 size={16} /> Code
-        </button>
-        <button className={leftMode === 'box' ? 'left-mode active' : 'left-mode'} onClick={() => setLeftMode(leftMode === 'box' ? null : 'box')}>
-          <Sparkles size={16} /> Box
-        </button>
-      </div>
-      {leftMode === 'code' && <CodePanel project={project} />}
-      {leftMode === 'box' && <BoxPanel />}
-    </aside>
-  )
-}
-
-function Timeline({ project, playhead, zoom, onZoom, onSeek, onSetFrame, onDragKeyframe }) {
+function Timeline({ project, playhead, zoom, selectedKeyframeId, onZoom, onSeek, onSetFrame, onDragKeyframe, onDeleteKeyframe, onSelectKeyframe, onDeleteAction }) {
   const trackRef = useRef(null)
   const duration = Math.max(project.duration, 1)
-  const tickStep = zoom >= 3 ? 0.25 : 0.5
-  const marks = Array.from({ length: Math.floor(duration / tickStep) + 1 }, (_, index) => Number((index * tickStep).toFixed(2))).filter((mark) => mark <= duration)
+  const tickStep = zoom >= 7 ? 0.03125 : zoom >= 5 ? 0.0625 : zoom >= 3 ? 0.125 : zoom >= 1.8 ? 0.25 : 0.5
+  const marks = Array.from({ length: Math.floor(duration / tickStep) + 1 }, (_, index) => Number((index * tickStep).toFixed(4))).filter((mark) => mark <= duration)
+  const contentWidth = `${Math.max(100, zoom * 100)}%`
   const playheadPct = `${(playhead / duration) * 100}%`
 
   const seekFromEvent = (event) => {
-    const rect = event.currentTarget.getBoundingClientRect()
+    const rect = trackRef.current.getBoundingClientRect()
     const pct = clamp((event.clientX - rect.left) / rect.width)
-    onSeek(Number((pct * duration).toFixed(2)))
+    onSeek(Number((pct * duration).toFixed(3)))
   }
 
   const handleWheel = (event) => {
     if (!event.ctrlKey) return
     event.preventDefault()
-    const direction = event.deltaY > 0 ? -0.25 : 0.25
-    onZoom(Number(clamp(zoom + direction, 1, 5).toFixed(2)))
+    const rect = event.currentTarget.getBoundingClientRect()
+    const anchor = clamp((event.clientX - rect.left) / rect.width)
+    const nextZoom = Number(clamp(zoom + (event.deltaY > 0 ? -0.45 : 0.45), 1, 9).toFixed(2))
+    onZoom(nextZoom, anchor)
   }
 
   return (
-    <section className="timeline-panel single-project" onWheel={handleWheel}>
+    <section className="timeline-panel" onWheel={handleWheel}>
       <div className="section-header">
         <div>
           <span>Timeline</span>
-          <strong>{project.keyframes.length ? `${project.keyframes.length} keyframes` : 'empty - move controls to create first keyframe'}</strong>
+          <strong>{project.windowTrack.keyframes.length} window frames / {project.actionTrack.actions.length} actions</strong>
         </div>
         <div className="timeline-actions">
-          <span>Ctrl + wheel zoom: {zoom.toFixed(2)}x</span>
+          <span>Ctrl + wheel zoom {zoom.toFixed(2)}x</span>
           <button className="set-frame-btn" onClick={onSetFrame}><Plus size={15} /> Set frame</button>
         </div>
       </div>
       <div className="timeline-scroll">
-        <div className="timeline-inner">
-          <div className="timeline-ruler clean-ruler">
-            {marks.map((mark) => <span key={mark} className={Number.isInteger(mark) ? 'major-tick' : 'minor-tick'} style={{ left: `${(mark / duration) * 100}%` }}>{mark}s</span>)}
+        <div className="timeline-inner" style={{ width: contentWidth }} ref={trackRef}>
+          <div className="timeline-ruler clean-ruler" onClick={seekFromEvent}>
+            {marks.map((mark) => (
+              <span key={mark} className={Number.isInteger(mark) ? 'major-tick' : 'minor-tick'} style={{ left: `${(mark / duration) * 100}%` }}>
+                {zoom >= 5 ? `${mark.toFixed(3)}s` : `${mark % 1 === 0 ? mark.toFixed(0) : mark}s`}
+              </span>
+            ))}
           </div>
-          <div className="single-track" ref={trackRef} onClick={seekFromEvent}>
-            <div className="project-clip">
-              <span>{project.name}</span>
-              <small>{project.duration}s</small>
+          <div className="editor-track window-track" onClick={seekFromEvent}>
+            <span className="track-label">Window</span>
+            <div className="track-lane">
               {sortedKeyframes(project).map((keyframe) => (
                 <button
-                  className="keyframe-marker"
+                  className={selectedKeyframeId === keyframe.id ? 'keyframe-marker active' : 'keyframe-marker'}
                   key={keyframe.id}
                   style={{ left: `${(keyframe.time / duration) * 100}%` }}
                   title={`${keyframe.time}s / ${keyframe.curvePreset}`}
+                  onClick={(event) => { event.stopPropagation(); onSelectKeyframe(keyframe.id); onSeek(keyframe.time) }}
+                  onDoubleClick={(event) => { event.stopPropagation(); onDeleteKeyframe(keyframe.id) }}
                   onPointerDown={(event) => {
                     event.stopPropagation()
+                    onSelectKeyframe(keyframe.id)
                     event.currentTarget.setPointerCapture(event.pointerId)
                     const rect = trackRef.current.getBoundingClientRect()
                     const move = (moveEvent) => {
                       const pct = clamp((moveEvent.clientX - rect.left) / rect.width)
-                      onDragKeyframe(keyframe.id, Number((pct * duration).toFixed(2)))
+                      onDragKeyframe(keyframe.id, Number((pct * duration).toFixed(3)))
                     }
                     const up = () => {
                       window.removeEventListener('pointermove', move)
@@ -416,10 +415,27 @@ function Timeline({ project, playhead, zoom, onZoom, onSeek, onSetFrame, onDragK
                 />
               ))}
             </div>
-            <b className="playhead" style={{ left: playheadPct }} />
           </div>
+          <div className="editor-track action-track" onClick={seekFromEvent}>
+            <span className="track-label">Action</span>
+            <div className="track-lane">
+              {sortedActions(project).map((action) => (
+                <button
+                  className="action-chip"
+                  key={action.id}
+                  style={{ left: `${(action.time / duration) * 100}%`, width: `${Math.max((action.duration / duration) * 100, 3)}%` }}
+                  title={`${action.time}s / ${action.type}`}
+                  onDoubleClick={(event) => { event.stopPropagation(); onDeleteAction(action.id) }}
+                >
+                  {action.type}
+                </button>
+              ))}
+            </div>
+          </div>
+          <b className="playhead" style={{ left: playheadPct }} />
         </div>
       </div>
+      <div className="timeline-help">Double click a keyframe/action to delete. Zoom focuses around the cursor.</div>
     </section>
   )
 }
@@ -428,10 +444,9 @@ function TransformEditor({ value, onChange, onSetFrame }) {
   const rows = [['x', -600, 600], ['y', -360, 360], ['scale', 0.35, 1.8], ['rotateX', -55, 55], ['rotateY', -55, 55], ['rotateZ', -40, 40], ['perspective', 700, 2600]]
 
   return (
-    <div className="transform-editor color-panel-blue">
+    <div className="transform-editor">
       <div className="mini-title">
-        <Rotate3D size={16} />
-        <span>Transform at playhead</span>
+        <span>Transform</span>
         <button onClick={onSetFrame}>Set frame</button>
       </div>
       {rows.map(([key, min, max]) => (
@@ -445,26 +460,8 @@ function TransformEditor({ value, onChange, onSetFrame }) {
   )
 }
 
-function ProjectInfo({ project }) {
-  const weight = estimateWeight(project.duration, project.fps)
-  const keyframes = sortedKeyframes(project)
-
-  return (
-    <div className="project-info-grid">
-      <span><b>Name</b>{project.name}</span>
-      <span><b>Source</b>{project.sourceName}</span>
-      <span><b>Page</b>{pageLabel(project.page)}</span>
-      <span><b>Size</b>16:9 preview</span>
-      <span><b>FPS</b>{project.fps}</span>
-      <span><b>Length</b>{project.duration}s</span>
-      <span><b>Keyframes</b>{keyframes.length}</span>
-      <span><b>Weight</b>~{weight.movMb}MB</span>
-    </div>
-  )
-}
-
-function GraphEditor({ project, playhead, onSetCurve }) {
-  const segment = getSegmentForTime(project, playhead)
+function GraphEditor({ project, playhead, selectedKeyframeId, onSetCurve }) {
+  const segment = getSegmentForTime(project, playhead, selectedKeyframeId)
   const activeId = segment?.keyframe?.curvePreset ?? 'linear'
   const active = curveById(activeId)
   const from = segment?.fromTime ?? 0
@@ -472,15 +469,14 @@ function GraphEditor({ project, playhead, onSetCurve }) {
   const [open, setOpen] = useState(true)
 
   return (
-    <div className="graph-editor color-panel-green">
-      <div className="curve-header" onClick={() => setOpen((value) => !value)}>
+    <div className="graph-editor">
+      <button className="curve-header" onClick={() => setOpen((value) => !value)}>
         <div>
-          <span>Curve editor</span>
-          <strong>{from.toFixed(2)}s to {to.toFixed(2)}s</strong>
+          <span>Curve Editor</span>
+          <strong>{segment ? `${from.toFixed(3)}s -> ${to.toFixed(3)}s` : 'Select a keyframe'}</strong>
         </div>
-        <button>{open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
-      </div>
-      <ProjectInfo project={project} />
+        {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+      </button>
       {open && (
         <>
           <div className="curve-browser">
@@ -492,7 +488,7 @@ function GraphEditor({ project, playhead, onSetCurve }) {
             ))}
           </div>
           <div className="curve-large">
-            <div className="curve-topline"><span>{from.toFixed(1)}s</span><strong>{active.label}</strong><span>{to.toFixed(1)}s</span></div>
+            <div className="curve-topline"><span>{from.toFixed(2)}s</span><strong>{active.label}</strong><span>{to.toFixed(2)}s</span></div>
             <svg viewBox="0 0 760 210" preserveAspectRatio="none">
               <g className="grid-lines">
                 {Array.from({ length: 8 }, (_, i) => <line key={`v${i}`} x1={40 + i * 94} y1="24" x2={40 + i * 94} y2="184" />)}
@@ -509,18 +505,29 @@ function GraphEditor({ project, playhead, onSetCurve }) {
   )
 }
 
-function Inspector({ project, currentTransform, onPatchProject, onPatchTransform, onSetFrame, onSetCurve }) {
+function Inspector({ project, currentTransform, selectedKeyframeId, onPatchProject, onPatchTransform, onSetFrame, onSetCurve, onDeleteSelected }) {
   return (
     <aside className="inspector inspector-split">
-      <div className="panel-title"><SlidersHorizontal size={18} /><div><span>Inspector</span><strong>{project.name}</strong></div></div>
-      <div className="field-grid color-panel-purple">
+      <div className="panel-title">
+        <SlidersHorizontal size={18} />
+        <div><span>Inspector</span><strong>{project.name}</strong></div>
+      </div>
+      <div className="field-grid">
         <label>Page<select value={project.page} onChange={(event) => onPatchProject({ page: event.target.value })}>{pages.filter((page) => page.id !== 'logo').map((page) => <option key={page.id} value={page.id}>{page.label}</option>)}</select></label>
         <label>Duration<input type="number" min="1" max="90" step="0.1" value={project.duration} onChange={(event) => onPatchProject({ duration: Number(event.target.value) })} /></label>
         <label>FPS<input type="number" min="24" max="120" step="1" value={project.fps} onChange={(event) => onPatchProject({ fps: Number(event.target.value) })} /></label>
         <label>Speed<input type="number" min="0.1" max="3" step="0.05" value={project.speed} onChange={(event) => onPatchProject({ speed: Number(event.target.value) })} /></label>
       </div>
       <TransformEditor value={currentTransform} onChange={onPatchTransform} onSetFrame={onSetFrame} />
-      <GraphEditor project={project} playhead={project.playhead ?? 0} onSetCurve={onSetCurve} />
+      <div className="control-hint">
+        <strong>Controls</strong>
+        <span>LMB drag: move X/Y</span>
+        <span>LMB + wheel: scale</span>
+        <span>RMB hold + wheel: rotate Y</span>
+        <span>Ctrl + wheel: rotate X</span>
+      </div>
+      <button className="delete-selected" disabled={!selectedKeyframeId} onClick={onDeleteSelected}><Trash2 size={15} /> Delete selected frame</button>
+      <GraphEditor project={project} playhead={project.playhead ?? 0} selectedKeyframeId={selectedKeyframeId} onSetCurve={onSetCurve} />
     </aside>
   )
 }
@@ -531,15 +538,18 @@ export default function App() {
   const [playing, setPlaying] = useState(false)
   const [showNew, setShowNew] = useState(false)
   const [showPresets, setShowPresets] = useState(false)
+  const [showCode, setShowCode] = useState(false)
   const [timelineZoom, setTimelineZoom] = useState(1)
   const [viewportHint, setViewportHint] = useState('Move X/Y')
   const [rotateMode, setRotateMode] = useState(false)
-  const [wheelFocus, setWheelFocus] = useState(false)
+  const [selectedKeyframeId, setSelectedKeyframeId] = useState(null)
   const rafRef = useRef(null)
   const startedAtRef = useRef(0)
   const basePlayheadRef = useRef(0)
   const dragRef = useRef(null)
   const rotateTimerRef = useRef(null)
+  const wheelFrameRef = useRef(null)
+  const wheelPatchRef = useRef(null)
 
   const projectWithPlayhead = useMemo(() => ({ ...project, playhead }), [project, playhead])
   const currentTransform = useMemo(() => getTransformAtTime(project, playhead), [project, playhead])
@@ -569,155 +579,221 @@ export default function App() {
     return () => cancelAnimationFrame(rafRef.current)
   }, [playing, project.duration, project.speed])
 
-  const setFrameAtPlayhead = (transform = currentTransform) => {
+  const setFrameAtPlayhead = (transform = currentTransform, extra = {}) => {
+    let nextId = selectedKeyframeId
     setProject((current) => {
-      const time = Number(Math.max(0, Math.min(current.duration, playhead)).toFixed(2))
-      const existing = current.keyframes.find((keyframe) => Math.abs(keyframe.time - time) < 0.015)
+      const time = Number(Math.max(0, Math.min(current.duration, playhead)).toFixed(3))
+      const existing = current.windowTrack.keyframes.find((keyframe) => Math.abs(keyframe.time - time) < 0.01)
       if (existing) {
+        nextId = existing.id
         return {
           ...current,
-          keyframes: current.keyframes.map((keyframe) => keyframe.id === existing.id ? { ...keyframe, transform } : keyframe),
+          windowTrack: {
+            ...current.windowTrack,
+            keyframes: current.windowTrack.keyframes.map((keyframe) => keyframe.id === existing.id ? { ...keyframe, transform, ...extra } : keyframe),
+          },
         }
       }
+      const id = crypto.randomUUID()
+      nextId = id
       return {
         ...current,
-        keyframes: [...current.keyframes, { id: crypto.randomUUID(), time, transform, curvePreset: 'linear' }].sort((a, b) => a.time - b.time),
+        windowTrack: {
+          ...current.windowTrack,
+          keyframes: [...current.windowTrack.keyframes, { id, time, transform, curvePreset: 'linear', ...extra }].sort((a, b) => a.time - b.time),
+        },
       }
     })
+    setSelectedKeyframeId(nextId)
   }
 
   const patchTransformAtPlayhead = (patch) => {
-    const next = { ...currentTransform, ...patch }
-    setFrameAtPlayhead(next)
+    setFrameAtPlayhead({ ...currentTransform, ...patch })
+  }
+
+  const patchTransformThrottled = (patch) => {
+    wheelPatchRef.current = { ...(wheelPatchRef.current || currentTransform), ...patch }
+    if (wheelFrameRef.current) return
+    wheelFrameRef.current = requestAnimationFrame(() => {
+      patchTransformAtPlayhead(wheelPatchRef.current)
+      wheelPatchRef.current = null
+      wheelFrameRef.current = null
+    })
   }
 
   const dragKeyframe = (id, time) => {
-    const clamped = Number(clamp(time / project.duration) * project.duration).toFixed(2)
-    const nextTime = Number(clamped)
+    const nextTime = Number((clamp(time / project.duration) * project.duration).toFixed(3))
     setPlayhead(nextTime)
+    setSelectedKeyframeId(id)
     setProject((current) => ({
       ...current,
-      keyframes: current.keyframes.map((keyframe) => keyframe.id === id ? { ...keyframe, time: nextTime } : keyframe).sort((a, b) => a.time - b.time),
+      windowTrack: {
+        ...current.windowTrack,
+        keyframes: current.windowTrack.keyframes.map((keyframe) => keyframe.id === id ? { ...keyframe, time: nextTime } : keyframe).sort((a, b) => a.time - b.time),
+      },
+    }))
+  }
+
+  const deleteKeyframe = (id) => {
+    setProject((current) => ({
+      ...current,
+      windowTrack: {
+        ...current.windowTrack,
+        keyframes: current.windowTrack.keyframes.filter((keyframe) => keyframe.id !== id),
+      },
+    }))
+    if (selectedKeyframeId === id) setSelectedKeyframeId(null)
+  }
+
+  const deleteAction = (id) => {
+    setProject((current) => ({
+      ...current,
+      actionTrack: {
+        ...current.actionTrack,
+        actions: current.actionTrack.actions.filter((action) => action.id !== id),
+      },
     }))
   }
 
   const setCurveForSegment = (curvePreset) => {
-    const segment = getSegmentForTime(project, playhead)
+    const segment = getSegmentForTime(project, playhead, selectedKeyframeId)
     if (!segment?.keyframe) return
+    setSelectedKeyframeId(segment.keyframe.id)
     setProject((current) => ({
       ...current,
-      keyframes: current.keyframes.map((keyframe) => keyframe.id === segment.keyframe.id ? { ...keyframe, curvePreset } : keyframe),
+      windowTrack: {
+        ...current.windowTrack,
+        keyframes: current.windowTrack.keyframes.map((keyframe) => keyframe.id === segment.keyframe.id ? { ...keyframe, curvePreset } : keyframe),
+      },
     }))
   }
 
-  const loadPreset = (preset) => {
-    if (!preset) {
-      setProject((current) => ({ ...makeProject({ name: current.name, duration: current.duration, presetId: 'empty' }), sourceUrl: current.sourceUrl, sourceName: current.sourceName, sourceFiles: current.sourceFiles }))
-      setPlayhead(0)
-      return
+  const addPresetToTimeline = (preset, tab) => {
+    const template = presetTemplates.find((item) => item.id === (preset.sourceId || preset.id))
+    if (!template) return
+    const startTime = Number(clamp(playhead / project.duration) * project.duration).toFixed(3)
+    const endTime = Number(Math.min(project.duration, Number(startTime) + Math.min(template.duration, Math.max(0.5, project.duration - Number(startTime)))).toFixed(3))
+    const category = tab === 'effects' ? 'effects' : tab
+    const newKeyframe = {
+      id: crypto.randomUUID(),
+      time: endTime,
+      transform: { ...template.end, scale: Math.max(template.end.scale, 0.86) },
+      curvePreset: 'ease',
+      preset: template.id,
+      category,
     }
-    setProject((current) => ({
-      ...makeProject({ name: current.name, presetId: preset.sourceId || preset.id }),
-      sourceUrl: current.sourceUrl,
-      sourceName: current.sourceName,
-      sourceFiles: current.sourceFiles,
+    const newActions = (template.actions || []).map((action) => ({
+      id: crypto.randomUUID(),
+      time: Number(Math.min(project.duration, Number(startTime) + (action.at || 0)).toFixed(3)),
+      duration: 0.45,
+      type: action.type,
+      label: action.label,
+      preset: template.id,
+      category,
     }))
-    setPlayhead(0)
-    setPlaying(false)
+    setProject((current) => ({
+      ...current,
+      page: template.page === 'logo' ? current.page : template.page,
+      windowTrack: {
+        ...current.windowTrack,
+        keyframes: [...current.windowTrack.keyframes, newKeyframe].sort((a, b) => a.time - b.time),
+      },
+      actionTrack: {
+        ...current.actionTrack,
+        actions: [...current.actionTrack.actions, ...newActions].sort((a, b) => a.time - b.time),
+      },
+    }))
+    setSelectedKeyframeId(newKeyframe.id)
   }
 
   const createProject = ({ name, duration, presetId }) => {
     setProject(makeProject({ name, duration, presetId }))
     setPlayhead(0)
     setPlaying(false)
+    setSelectedKeyframeId(null)
     setShowNew(false)
-  }
-
-  const previewUrlForDetach = () => {
-    const pageMap = { 'control-center': 'control-center', boost: 'boost', dpc: 'dpc' }
-    return `${inputLagPreviewUrl}?renderCapture=boost-ai&studioPreview=1&page=${pageMap[project.page] ?? 'boost'}`
   }
 
   const handleViewportPointerDown = (event) => {
     if (event.button === 2) {
       event.preventDefault()
-      setViewportHint('Hold RMB: rotate mode')
+      setViewportHint('Hold RMB: rotate Y with wheel')
       rotateTimerRef.current = window.setTimeout(() => {
         setRotateMode(true)
-        setViewportHint('Rotate X/Y with wheel')
-      }, 900)
+        setViewportHint('Rotate Y')
+      }, 450)
       return
     }
     if (event.button !== 0) return
     event.currentTarget.setPointerCapture(event.pointerId)
-    dragRef.current = {
-      x: event.clientX,
-      y: event.clientY,
-      start: currentTransform,
-    }
+    dragRef.current = { x: event.clientX, y: event.clientY, start: currentTransform }
     setViewportHint('Move X/Y')
   }
 
   const handleViewportPointerMove = (event) => {
     if (!dragRef.current) return
-    const dx = event.clientX - dragRef.current.x
-    const dy = event.clientY - dragRef.current.y
-    patchTransformAtPlayhead({
-      x: Number((dragRef.current.start.x + dx).toFixed(1)),
-      y: Number((dragRef.current.start.y + dy).toFixed(1)),
+    patchTransformThrottled({
+      x: Number((dragRef.current.start.x + event.clientX - dragRef.current.x).toFixed(1)),
+      y: Number((dragRef.current.start.y + event.clientY - dragRef.current.y).toFixed(1)),
     })
   }
 
   const clearViewportPointer = () => {
     dragRef.current = null
     window.clearTimeout(rotateTimerRef.current)
-    if (!rotateMode) setViewportHint('Move X/Y')
-    setWheelFocus(false)
+    setRotateMode(false)
+    setViewportHint('Move X/Y')
   }
 
   const handleViewportWheel = (event) => {
     event.preventDefault()
-    if (rotateMode || event.buttons === 2 || event.altKey) {
-      const delta = event.deltaY > 0 ? 1 : -1
-      if (event.shiftKey) {
-        patchTransformAtPlayhead({ rotateX: Number((currentTransform.rotateX + delta).toFixed(1)) })
-        setViewportHint('Rotate X')
-      } else {
-        patchTransformAtPlayhead({ rotateY: Number((currentTransform.rotateY + delta).toFixed(1)) })
-        setViewportHint('Rotate Y')
-      }
+    const direction = event.deltaY > 0 ? -1 : 1
+    if (event.ctrlKey) {
+      patchTransformThrottled({ rotateX: Number((currentTransform.rotateX + direction).toFixed(1)) })
+      setViewportHint('Ctrl + wheel: Rotate X')
       return
     }
-    if (!wheelFocus && event.buttons !== 1) {
-      setViewportHint('Click/hold window, then wheel')
+    if (rotateMode || event.buttons === 2) {
+      patchTransformThrottled({ rotateY: Number((currentTransform.rotateY + direction).toFixed(1)) })
+      setViewportHint('RMB + wheel: Rotate Y')
       return
     }
-    const delta = event.deltaY > 0 ? -0.02 : 0.02
-    patchTransformAtPlayhead({ scale: Number(clamp(currentTransform.scale + delta, 0.35, 1.8).toFixed(3)) })
-    setViewportHint('Scale')
+    patchTransformThrottled({ scale: Number(clamp(currentTransform.scale + direction * 0.02, 0.35, 1.8).toFixed(3)) })
+    setViewportHint('Wheel: Scale')
+  }
+
+  const handleTimelineZoom = (nextZoom) => {
+    setTimelineZoom(nextZoom)
   }
 
   return (
     <div className="studio-app">
       <header className="topbar split-topbar">
-        <div className="app-logo"><span>IL</span><div><strong>Curvy Editor</strong><small>InputLag window animation studio</small></div></div>
-        <div className="top-actions"><button onClick={() => setShowNew(true)}><Plus size={16} /> New project</button><button><Download size={16} /> Export MOV</button></div>
+        <div className="app-logo">
+          <span>IL</span>
+          <div><strong>Curvy Editor</strong><small>InputLag window animation studio</small></div>
+        </div>
+        <div className="topbar-slash" />
+        <ProjectMeta project={project} />
+        <div className="top-actions">
+          <button className="icon-action ready-presets-top" title="Ready Presets" onClick={() => setShowPresets(true)}><Sparkles size={17} /></button>
+          <button className="icon-action" title="Code" onClick={() => setShowCode((value) => !value)}><Code2 size={17} /></button>
+          <button className="icon-action play-square" title="Play" onClick={() => setPlaying((value) => !value)}>{playing ? <Pause size={17} /> : <Play size={17} />}</button>
+          <button onClick={() => setShowNew(true)}><Plus size={16} /> New</button>
+          <button className="export-disabled" title="Render engine comes in phase 2"><Download size={16} /> Render phase 2</button>
+        </div>
       </header>
 
-      <main className="workspace">
-        <PresetPanel project={project} onOpen={() => setShowPresets(true)} />
+      <main className="workspace no-left">
         <section className="studio-center">
           <section className="preview-panel">
             <div className="section-header">
               <div><span>Live preview</span><strong>{project.name}</strong></div>
               <div className="preview-controls">
-                <button onClick={() => setPlaying((value) => !value)}>{playing ? <Pause size={16} /> : <Play size={16} />} {playing ? 'Pause' : 'Play'}</button>
+                <button className="preview-play" onClick={() => setPlaying((value) => !value)}>{playing ? <Pause size={16} /> : <Play size={16} />} {playing ? 'Pause' : 'Play'}</button>
                 <input type="range" min="0" max={project.duration} step="0.01" value={playhead} onChange={(event) => setPlayhead(Number(event.target.value))} />
                 <span>{playhead.toFixed(2)}s</span>
-                <button onClick={() => window.open(previewUrlForDetach(), 'inputlag-preview-detached', 'width=1280,height=800')}><ExternalLink size={15} /> Detach</button>
-                <SourceBinder project={project} onBind={(patch) => setProject((current) => ({ ...current, ...patch }))} />
               </div>
-              <div className="preview-badges"><span>{pageLabel(project.page)}</span><span>{project.fps} fps</span><span>{project.duration}s</span></div>
             </div>
             <div className="preview-canvas">
               <div
@@ -726,8 +802,6 @@ export default function App() {
                 onPointerMove={handleViewportPointerMove}
                 onPointerUp={clearViewportPointer}
                 onPointerCancel={clearViewportPointer}
-                onMouseEnter={() => setWheelFocus(true)}
-                onMouseLeave={() => setWheelFocus(false)}
                 onWheel={handleViewportWheel}
                 onContextMenu={(event) => event.preventDefault()}
                 style={{ transform: `perspective(${currentTransform.perspective}px) translate(${currentTransform.x}px, ${currentTransform.y}px) scale(${currentTransform.scale}) rotateX(${currentTransform.rotateX}deg) rotateY(${currentTransform.rotateY}deg) rotateZ(${currentTransform.rotateZ}deg)` }}
@@ -741,23 +815,30 @@ export default function App() {
             project={project}
             playhead={playhead}
             zoom={timelineZoom}
-            onZoom={setTimelineZoom}
+            selectedKeyframeId={selectedKeyframeId}
+            onZoom={handleTimelineZoom}
             onSeek={setPlayhead}
             onSetFrame={() => setFrameAtPlayhead()}
             onDragKeyframe={dragKeyframe}
+            onDeleteKeyframe={deleteKeyframe}
+            onSelectKeyframe={setSelectedKeyframeId}
+            onDeleteAction={deleteAction}
           />
         </section>
         <Inspector
           project={projectWithPlayhead}
           currentTransform={currentTransform}
+          selectedKeyframeId={selectedKeyframeId}
           onPatchProject={(patch) => setProject((current) => ({ ...current, ...patch }))}
           onPatchTransform={patchTransformAtPlayhead}
           onSetFrame={() => setFrameAtPlayhead()}
           onSetCurve={setCurveForSegment}
+          onDeleteSelected={() => selectedKeyframeId && deleteKeyframe(selectedKeyframeId)}
         />
       </main>
+      {showCode && <CodePanel project={project} playhead={playhead} onClose={() => setShowCode(false)} />}
       <NewProjectModal open={showNew} onClose={() => setShowNew(false)} onCreate={createProject} />
-      <PresetBrowserModal open={showPresets} onClose={() => setShowPresets(false)} onLoad={loadPreset} />
+      <PresetBrowserModal open={showPresets} onClose={() => setShowPresets(false)} onAdd={addPresetToTimeline} />
     </div>
   )
 }
