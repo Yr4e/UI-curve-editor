@@ -1,0 +1,10 @@
+node_modules/
+dist/
+desktop-build/
+public/inputlag-preview/
+*.png
+*.mov
+*.mp4
+*.log
+.env
+.env.*

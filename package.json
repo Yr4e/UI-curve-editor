@@ -1,0 +1,46 @@
+{
+  "name": "inputlag-render-studio",
+  "productName": "Curvy Editor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "prebuild": "node scripts/copy-inputlag-preview.cjs",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "electron": "npm run build && electron .",
+    "dist:win": "npm run build && electron-builder --win portable"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "lucide-react": "^0.469.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "vite": "^6.0.5"
+  },
+  "devDependencies": {
+    "electron": "^42.2.0",
+    "electron-builder": "^26.8.1"
+  },
+  "build": {
+    "appId": "ai.inputlag.curvy-editor",
+    "productName": "Curvy Editor",
+    "directories": {
+      "output": "desktop-build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        "portable"
+      ],
+      "artifactName": "Curvy-Editor-${version}.exe"
+    }
+  }
+}
