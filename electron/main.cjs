@@ -1,5 +1,23 @@
-const { app, BrowserWindow, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, shell } = require('electron')
 const path = require('node:path')
+const fs = require('node:fs/promises')
+const { existsSync } = require('node:fs')
+const { spawn } = require('node:child_process')
+
+const sanitizeName = (value) => String(value || 'curvy-render').replace(/[<>:"/\\|?*\x00-\x1F]/g, '-').slice(0, 80)
+
+const run = (command, args, cwd) => new Promise((resolve, reject) => {
+  const child = spawn(command, args, { cwd, windowsHide: true })
+  let stderr = ''
+  child.stderr.on('data', (chunk) => { stderr += chunk.toString() })
+  child.on('error', reject)
+  child.on('close', (code) => {
+    if (code === 0) resolve()
+    else reject(new Error(stderr || `${command} exited with ${code}`))
+  })
+})
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -40,6 +58,56 @@ function createWindow() {
 }
 
 app.whenReady().then(createWindow)
+
+ipcMain.handle('render:mov', async (event, payload = {}) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win) return { ok: false, error: 'No active editor window' }
+
+  const project = payload.project || {}
+  const fps = Math.max(1, Math.min(Number(project.fps) || 60, 120))
+  const duration = Math.max(0.1, Math.min(Number(project.duration) || 6, 90))
+  const frameCount = Math.max(1, Math.ceil(duration * fps))
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const renderRoot = path.join(app.getPath('desktop'), 'inputlag assets', 'render-studio-exports')
+  const outDir = path.join(renderRoot, `${stamp}-${sanitizeName(project.name)}`)
+  const framesDir = path.join(outDir, 'frames')
+  await fs.mkdir(framesDir, { recursive: true })
+
+  const bounds = win.getBounds()
+  const rect = payload.rect
+    ? {
+        x: Math.max(0, Math.round(payload.rect.x)),
+        y: Math.max(0, Math.round(payload.rect.y)),
+        width: Math.min(bounds.width, Math.max(64, Math.round(payload.rect.width))),
+        height: Math.min(bounds.height, Math.max(64, Math.round(payload.rect.height))),
+      }
+    : undefined
+
+  for (let index = 0; index < frameCount; index += 1) {
+    const time = Math.min(duration, index / fps)
+    event.sender.send('render:set-time', time)
+    await delay(22)
+    const image = await win.webContents.capturePage(rect)
+    const file = path.join(framesDir, `frame-${String(index).padStart(5, '0')}.png`)
+    await fs.writeFile(file, image.toPNG())
+  }
+
+  const output = path.join(outDir, `${sanitizeName(project.name)}.mov`)
+  const inputPattern = path.join(framesDir, 'frame-%05d.png')
+  await run('ffmpeg', [
+    '-y',
+    '-framerate', String(fps),
+    '-i', inputPattern,
+    '-c:v', 'prores_ks',
+    '-profile:v', '3',
+    '-pix_fmt', 'yuva444p10le',
+    output,
+  ], outDir)
+
+  if (!existsSync(output)) return { ok: false, error: 'MOV was not created' }
+  shell.showItemInFolder(output)
+  return { ok: true, output }
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

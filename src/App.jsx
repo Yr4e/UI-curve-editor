@@ -1,7 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ChevronDown,
-  ChevronUp,
   Code2,
   Download,
   Pause,
@@ -341,10 +339,10 @@ function CodePanel({ project, playhead, onClose }) {
   )
 }
 
-function Timeline({ project, playhead, zoom, selectedKeyframeId, onZoom, onSeek, onSetFrame, onDragKeyframe, onDeleteKeyframe, onSelectKeyframe, onDeleteAction }) {
+function Timeline({ project, playhead, zoom, selectedKeyframeId, onZoom, onSeek, onSetFrame, onDragKeyframe, onDeleteKeyframe, onSelectKeyframe, onDeleteAction, onDeleteSelected }) {
   const trackRef = useRef(null)
   const duration = Math.max(project.duration, 1)
-  const tickStep = zoom >= 7 ? 0.03125 : zoom >= 5 ? 0.0625 : zoom >= 3 ? 0.125 : zoom >= 1.8 ? 0.25 : 0.5
+  const tickStep = 0.5
   const marks = Array.from({ length: Math.floor(duration / tickStep) + 1 }, (_, index) => Number((index * tickStep).toFixed(4))).filter((mark) => mark <= duration)
   const contentWidth = `${Math.max(100, zoom * 100)}%`
   const playheadPct = `${(playhead / duration) * 100}%`
@@ -353,6 +351,19 @@ function Timeline({ project, playhead, zoom, selectedKeyframeId, onZoom, onSeek,
     const rect = trackRef.current.getBoundingClientRect()
     const pct = clamp((event.clientX - rect.left) / rect.width)
     onSeek(Number((pct * duration).toFixed(3)))
+  }
+
+  const beginScrub = (event) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    seekFromEvent(event)
+    const move = (moveEvent) => seekFromEvent(moveEvent)
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
   }
 
   const handleWheel = (event) => {
@@ -374,18 +385,19 @@ function Timeline({ project, playhead, zoom, selectedKeyframeId, onZoom, onSeek,
         <div className="timeline-actions">
           <span>Ctrl + wheel zoom {zoom.toFixed(2)}x</span>
           <button className="set-frame-btn" onClick={onSetFrame}><Plus size={15} /> Set frame</button>
+          <button className="delete-frame-btn" disabled={!selectedKeyframeId} onClick={onDeleteSelected}><Trash2 size={15} /> Delete frame</button>
         </div>
       </div>
       <div className="timeline-scroll">
         <div className="timeline-inner" style={{ width: contentWidth }} ref={trackRef}>
-          <div className="timeline-ruler clean-ruler" onClick={seekFromEvent}>
+          <div className="timeline-ruler clean-ruler" onPointerDown={beginScrub}>
             {marks.map((mark) => (
               <span key={mark} className={Number.isInteger(mark) ? 'major-tick' : 'minor-tick'} style={{ left: `${(mark / duration) * 100}%` }}>
-                {zoom >= 5 ? `${mark.toFixed(3)}s` : `${mark % 1 === 0 ? mark.toFixed(0) : mark}s`}
+                {mark % 1 === 0 ? `${mark.toFixed(0)}s` : `${mark.toFixed(1)}s`}
               </span>
             ))}
           </div>
-          <div className="editor-track window-track" onClick={seekFromEvent}>
+          <div className="editor-track window-track" onPointerDown={beginScrub}>
             <span className="track-label">Window</span>
             <div className="track-lane">
               {sortedKeyframes(project).map((keyframe) => (
@@ -416,7 +428,7 @@ function Timeline({ project, playhead, zoom, selectedKeyframeId, onZoom, onSeek,
               ))}
             </div>
           </div>
-          <div className="editor-track action-track" onClick={seekFromEvent}>
+          <div className="editor-track action-track" onPointerDown={beginScrub}>
             <span className="track-label">Action</span>
             <div className="track-lane">
               {sortedActions(project).map((action) => (
@@ -435,19 +447,21 @@ function Timeline({ project, playhead, zoom, selectedKeyframeId, onZoom, onSeek,
           <b className="playhead" style={{ left: playheadPct }} />
         </div>
       </div>
-      <div className="timeline-help">Double click a keyframe/action to delete. Zoom focuses around the cursor.</div>
     </section>
   )
 }
 
-function TransformEditor({ value, onChange, onSetFrame }) {
+function TransformEditor({ value, onChange, onSetFrame, onResetSelected, canReset }) {
   const rows = [['x', -600, 600], ['y', -360, 360], ['scale', 0.35, 1.8], ['rotateX', -55, 55], ['rotateY', -55, 55], ['rotateZ', -40, 40], ['perspective', 700, 2600]]
 
   return (
     <div className="transform-editor">
       <div className="mini-title">
         <span>Transform</span>
-        <button onClick={onSetFrame}>Set frame</button>
+        <div className="mini-title-actions">
+          <button onClick={onSetFrame}>Set frame</button>
+          <button disabled={!canReset} onClick={onResetSelected}>Reset</button>
+        </div>
       </div>
       {rows.map(([key, min, max]) => (
         <label key={key}>
@@ -466,46 +480,29 @@ function GraphEditor({ project, playhead, selectedKeyframeId, onSetCurve }) {
   const active = curveById(activeId)
   const from = segment?.fromTime ?? 0
   const to = segment?.toTime ?? project.duration
-  const [open, setOpen] = useState(true)
 
   return (
     <div className="graph-editor">
-      <button className="curve-header" onClick={() => setOpen((value) => !value)}>
+      <div className="curve-header">
         <div>
           <span>Curve Editor</span>
           <strong>{segment ? `${from.toFixed(3)}s -> ${to.toFixed(3)}s` : 'Select a keyframe'}</strong>
         </div>
-        {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-      </button>
-      {open && (
-        <>
-          <div className="curve-browser">
-            {curvePresets.map((curve) => (
-              <button className={curve.id === activeId ? 'curve-preset active' : 'curve-preset'} key={curve.id} onClick={() => onSetCurve(curve.id)}>
-                <svg viewBox="0 0 260 130" preserveAspectRatio="none"><path d={curve.path} /></svg>
-                <span>{curve.label}</span>
-              </button>
-            ))}
-          </div>
-          <div className="curve-large">
-            <div className="curve-topline"><span>{from.toFixed(2)}s</span><strong>{active.label}</strong><span>{to.toFixed(2)}s</span></div>
-            <svg viewBox="0 0 760 210" preserveAspectRatio="none">
-              <g className="grid-lines">
-                {Array.from({ length: 8 }, (_, i) => <line key={`v${i}`} x1={40 + i * 94} y1="24" x2={40 + i * 94} y2="184" />)}
-                {Array.from({ length: 5 }, (_, i) => <line key={`h${i}`} x1="40" y1={24 + i * 40} x2="720" y2={24 + i * 40} />)}
-              </g>
-              <path d={`M40 184 C${40 + active.curve[0] * 680} ${184 - active.curve[1] * 160}, ${40 + active.curve[2] * 680} ${184 - active.curve[3] * 160}, 720 24`} />
-              <circle cx={40 + active.curve[0] * 680} cy={184 - active.curve[1] * 160} r="5" />
-              <circle cx={40 + active.curve[2] * 680} cy={184 - active.curve[3] * 160} r="5" />
-            </svg>
-          </div>
-        </>
-      )}
+        <b>{active.label}</b>
+      </div>
+      <div className="curve-browser">
+        {curvePresets.map((curve) => (
+          <button className={curve.id === activeId ? 'curve-preset active' : 'curve-preset'} key={curve.id} onClick={() => onSetCurve(curve.id)}>
+            <svg viewBox="0 0 260 130" preserveAspectRatio="none"><path d={curve.path} /></svg>
+            <span>{curve.label}</span>
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
 
-function Inspector({ project, currentTransform, selectedKeyframeId, onPatchProject, onPatchTransform, onSetFrame, onSetCurve, onDeleteSelected }) {
+function Inspector({ project, currentTransform, selectedKeyframeId, onPatchProject, onPatchTransform, onSetFrame, onSetCurve, onResetSelected }) {
   return (
     <aside className="inspector inspector-split">
       <div className="panel-title">
@@ -518,7 +515,7 @@ function Inspector({ project, currentTransform, selectedKeyframeId, onPatchProje
         <label>FPS<input type="number" min="24" max="120" step="1" value={project.fps} onChange={(event) => onPatchProject({ fps: Number(event.target.value) })} /></label>
         <label>Speed<input type="number" min="0.1" max="3" step="0.05" value={project.speed} onChange={(event) => onPatchProject({ speed: Number(event.target.value) })} /></label>
       </div>
-      <TransformEditor value={currentTransform} onChange={onPatchTransform} onSetFrame={onSetFrame} />
+      <TransformEditor value={currentTransform} onChange={onPatchTransform} onSetFrame={onSetFrame} onResetSelected={onResetSelected} canReset={Boolean(selectedKeyframeId)} />
       <div className="control-hint">
         <strong>Controls</strong>
         <span>LMB drag: move X/Y</span>
@@ -526,7 +523,6 @@ function Inspector({ project, currentTransform, selectedKeyframeId, onPatchProje
         <span>RMB hold + wheel: rotate Y</span>
         <span>Ctrl + wheel: rotate X</span>
       </div>
-      <button className="delete-selected" disabled={!selectedKeyframeId} onClick={onDeleteSelected}><Trash2 size={15} /> Delete selected frame</button>
       <GraphEditor project={project} playhead={project.playhead ?? 0} selectedKeyframeId={selectedKeyframeId} onSetCurve={onSetCurve} />
     </aside>
   )
@@ -541,6 +537,7 @@ export default function App() {
   const [showCode, setShowCode] = useState(false)
   const [timelineZoom, setTimelineZoom] = useState(1)
   const [viewportHint, setViewportHint] = useState('Move X/Y')
+  const [renderStatus, setRenderStatus] = useState('')
   const [rotateMode, setRotateMode] = useState(false)
   const [selectedKeyframeId, setSelectedKeyframeId] = useState(null)
   const rafRef = useRef(null)
@@ -565,6 +562,14 @@ export default function App() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
+
+  useEffect(() => {
+    if (!window.curvy?.onRenderSetTime) return undefined
+    return window.curvy.onRenderSetTime((time) => {
+      setPlaying(false)
+      setPlayhead(Number((clamp(time / project.duration) * project.duration).toFixed(3)))
+    })
+  }, [project.duration])
 
   useEffect(() => {
     if (!playing) return undefined
@@ -643,6 +648,19 @@ export default function App() {
       },
     }))
     if (selectedKeyframeId === id) setSelectedKeyframeId(null)
+  }
+
+  const resetSelectedFrame = () => {
+    if (!selectedKeyframeId) return
+    setProject((current) => ({
+      ...current,
+      windowTrack: {
+        ...current.windowTrack,
+        keyframes: current.windowTrack.keyframes.map((keyframe) => (
+          keyframe.id === selectedKeyframeId ? { ...keyframe, transform: { ...defaultTransform } } : keyframe
+        )),
+      },
+    }))
   }
 
   const deleteAction = (id) => {
@@ -766,12 +784,33 @@ export default function App() {
     setTimelineZoom(nextZoom)
   }
 
+  const exportMov = async () => {
+    if (!window.curvy?.renderMov) {
+      setRenderStatus('Render works in desktop build')
+      return
+    }
+    setRenderStatus('Rendering...')
+    const canvasRect = document.querySelector('.preview-canvas')?.getBoundingClientRect()
+    const rect = canvasRect
+      ? { x: Math.round(canvasRect.x), y: Math.round(canvasRect.y), width: Math.round(canvasRect.width), height: Math.round(canvasRect.height) }
+      : null
+    const result = await window.curvy.renderMov({
+      project: {
+        name: project.name,
+        duration: project.duration,
+        fps: project.fps,
+      },
+      rect,
+    })
+    setRenderStatus(result?.ok ? `Rendered: ${result.output}` : `Render failed: ${result?.error || 'unknown error'}`)
+  }
+
   return (
     <div className="studio-app">
       <header className="topbar split-topbar">
         <div className="app-logo">
-          <span>IL</span>
-          <div><strong>Curvy Editor</strong><small>InputLag window animation studio</small></div>
+          <span className="il-mark">IL</span>
+          <div><strong>Inputlag</strong><small>Curve Editor</small></div>
         </div>
         <div className="topbar-slash" />
         <ProjectMeta project={project} />
@@ -780,7 +819,7 @@ export default function App() {
           <button className="icon-action" title="Code" onClick={() => setShowCode((value) => !value)}><Code2 size={17} /></button>
           <button className="icon-action play-square" title="Play" onClick={() => setPlaying((value) => !value)}>{playing ? <Pause size={17} /> : <Play size={17} />}</button>
           <button onClick={() => setShowNew(true)}><Plus size={16} /> New</button>
-          <button className="export-disabled" title="Render engine comes in phase 2"><Download size={16} /> Render phase 2</button>
+          <button className="render-action" onClick={exportMov}><Download size={16} /> Render MOV</button>
         </div>
       </header>
 
@@ -809,6 +848,7 @@ export default function App() {
                 <div className="viewport-hint">{viewportHint}</div>
                 <InputLagWindow project={project} page={project.page} />
               </div>
+              {renderStatus && <div className="render-status">{renderStatus}</div>}
             </div>
           </section>
           <Timeline
@@ -823,6 +863,7 @@ export default function App() {
             onDeleteKeyframe={deleteKeyframe}
             onSelectKeyframe={setSelectedKeyframeId}
             onDeleteAction={deleteAction}
+            onDeleteSelected={() => selectedKeyframeId && deleteKeyframe(selectedKeyframeId)}
           />
         </section>
         <Inspector
@@ -833,7 +874,7 @@ export default function App() {
           onPatchTransform={patchTransformAtPlayhead}
           onSetFrame={() => setFrameAtPlayhead()}
           onSetCurve={setCurveForSegment}
-          onDeleteSelected={() => selectedKeyframeId && deleteKeyframe(selectedKeyframeId)}
+          onResetSelected={resetSelectedFrame}
         />
       </main>
       {showCode && <CodePanel project={project} playhead={playhead} onClose={() => setShowCode(false)} />}
