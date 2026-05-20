@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Boxes,
+  ChevronDown,
+  ChevronUp,
+  Code2,
   Download,
   ExternalLink,
-  Film,
   FolderOpen,
   Pause,
   Play,
@@ -13,7 +14,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react'
-import { pages, presetTemplates, workboxLoops } from './data/presets.js'
+import { pages, presetTemplates } from './data/presets.js'
 
 const inputLagPreviewUrl = window.location.protocol === 'file:'
   ? './inputlag-preview/index.html'
@@ -22,7 +23,7 @@ const inputLagPreviewUrl = window.location.protocol === 'file:'
 const defaultTransform = {
   x: 0,
   y: 0,
-  scale: 0.96,
+  scale: 1,
   rotateX: 0,
   rotateY: 0,
   rotateZ: 0,
@@ -148,7 +149,7 @@ const getSegmentForTime = (project, time) => {
   return { fromTime: last.time, toTime: project.duration, keyframe: last, hold: true }
 }
 
-function SourceBinder({ project, onBind, onNew, onDetach }) {
+function SourceBinder({ project, onBind }) {
   const fileInputRef = useRef(null)
 
   const handleFiles = (event) => {
@@ -164,26 +165,11 @@ function SourceBinder({ project, onBind, onNew, onDetach }) {
   }
 
   return (
-    <section className="source-binder">
-      <div className="section-header">
-        <div>
-          <span>InputLag source</span>
-          <strong>{project.name}</strong>
-        </div>
-        <div className="source-actions">
-          <button onClick={onNew}><Plus size={15} /> New</button>
-          <button onClick={onDetach}><ExternalLink size={15} /> Detach</button>
-          <button onClick={() => fileInputRef.current?.click()}><FolderOpen size={15} /> Bind version</button>
-        </div>
-      </div>
-      <div className="source-body">
-        <div>
-          <span className="source-dot live" />
-          <strong>{project.sourceName}</strong>
-          <p>{project.sourceFiles ? `${project.sourceFiles} files selected` : 'Default: local InputLag renderer preview'}</p>
-        </div>
-        <small>{project.sourceUrl}</small>
-      </div>
+    <section className="source-inline">
+      <span className="source-dot live" />
+      <strong>{project.sourceName}</strong>
+      <small>{project.sourceFiles ? `${project.sourceFiles} files` : 'local preview'}</small>
+      <button onClick={() => fileInputRef.current?.click()}><FolderOpen size={14} /> Bind</button>
       <input ref={fileInputRef} type="file" multiple webkitdirectory="true" directory="true" onChange={handleFiles} hidden />
     </section>
   )
@@ -303,7 +289,41 @@ function PresetBrowserModal({ open, onClose, onLoad }) {
   )
 }
 
-function PresetPanel({ onOpen }) {
+function CodePanel({ project }) {
+  const outputCode = {
+    project: project.name,
+    page: project.page,
+    duration: project.duration,
+    fps: project.fps,
+    source: project.sourceName,
+    baseTransform: project.baseTransform,
+    keyframes: sortedKeyframes(project).map((keyframe) => ({
+      time: keyframe.time,
+      curve: keyframe.curvePreset,
+      transform: keyframe.transform,
+    })),
+  }
+
+  return (
+    <div className="left-code-panel">
+      <strong>Output code</strong>
+      <pre>{JSON.stringify(outputCode, null, 2)}</pre>
+    </div>
+  )
+}
+
+function BoxPanel() {
+  return (
+    <div className="left-code-panel">
+      <strong>Box</strong>
+      <p>Ready loops will live here later. Bottom panel removed.</p>
+    </div>
+  )
+}
+
+function PresetPanel({ project, onOpen }) {
+  const [leftMode, setLeftMode] = useState(null)
+
   return (
     <aside className="preset-library compact-presets">
       <div className="panel-title">
@@ -317,10 +337,16 @@ function PresetPanel({ onOpen }) {
         <Sparkles size={18} />
         <span>Ready presets</span>
       </button>
-      <div className="left-help">
-        <strong>How it works</strong>
-        <p>Open presets, preview tiles on hover, or start clean without a preset.</p>
+      <div className="left-button-stack">
+        <button className={leftMode === 'code' ? 'left-mode active' : 'left-mode'} onClick={() => setLeftMode(leftMode === 'code' ? null : 'code')}>
+          <Code2 size={16} /> Code
+        </button>
+        <button className={leftMode === 'box' ? 'left-mode active' : 'left-mode'} onClick={() => setLeftMode(leftMode === 'box' ? null : 'box')}>
+          <Sparkles size={16} /> Box
+        </button>
       </div>
+      {leftMode === 'code' && <CodePanel project={project} />}
+      {leftMode === 'box' && <BoxPanel />}
     </aside>
   )
 }
@@ -328,8 +354,8 @@ function PresetPanel({ onOpen }) {
 function Timeline({ project, playhead, zoom, onZoom, onSeek, onSetFrame, onDragKeyframe }) {
   const trackRef = useRef(null)
   const duration = Math.max(project.duration, 1)
-  const marks = Array.from({ length: Math.floor(duration) + 1 }, (_, index) => index)
-  const width = `${zoom * 100}%`
+  const tickStep = zoom >= 3 ? 0.25 : 0.5
+  const marks = Array.from({ length: Math.floor(duration / tickStep) + 1 }, (_, index) => Number((index * tickStep).toFixed(2))).filter((mark) => mark <= duration)
   const playheadPct = `${(playhead / duration) * 100}%`
 
   const seekFromEvent = (event) => {
@@ -338,22 +364,29 @@ function Timeline({ project, playhead, zoom, onZoom, onSeek, onSetFrame, onDragK
     onSeek(Number((pct * duration).toFixed(2)))
   }
 
+  const handleWheel = (event) => {
+    if (!event.ctrlKey) return
+    event.preventDefault()
+    const direction = event.deltaY > 0 ? -0.25 : 0.25
+    onZoom(Number(clamp(zoom + direction, 1, 5).toFixed(2)))
+  }
+
   return (
-    <section className="timeline-panel single-project">
+    <section className="timeline-panel single-project" onWheel={handleWheel}>
       <div className="section-header">
         <div>
-          <span>Project timeline</span>
+          <span>Timeline</span>
           <strong>{project.keyframes.length ? `${project.keyframes.length} keyframes` : 'empty - move controls to create first keyframe'}</strong>
         </div>
         <div className="timeline-actions">
-          <label>Zoom <input type="range" min="1" max="5" step="0.25" value={zoom} onChange={(event) => onZoom(Number(event.target.value))} /></label>
+          <span>Ctrl + wheel zoom: {zoom.toFixed(2)}x</span>
           <button className="set-frame-btn" onClick={onSetFrame}><Plus size={15} /> Set frame</button>
         </div>
       </div>
       <div className="timeline-scroll">
-        <div className="timeline-inner" style={{ width }}>
+        <div className="timeline-inner">
           <div className="timeline-ruler clean-ruler">
-            {marks.map((mark) => <span key={mark} style={{ left: `${(mark / duration) * 100}%` }}>{mark}s</span>)}
+            {marks.map((mark) => <span key={mark} className={Number.isInteger(mark) ? 'major-tick' : 'minor-tick'} style={{ left: `${(mark / duration) * 100}%` }}>{mark}s</span>)}
           </div>
           <div className="single-track" ref={trackRef} onClick={seekFromEvent}>
             <div className="project-clip">
@@ -412,46 +445,71 @@ function TransformEditor({ value, onChange, onSetFrame }) {
   )
 }
 
+function ProjectInfo({ project }) {
+  const weight = estimateWeight(project.duration, project.fps)
+  const keyframes = sortedKeyframes(project)
+
+  return (
+    <div className="project-info-grid">
+      <span><b>Name</b>{project.name}</span>
+      <span><b>Source</b>{project.sourceName}</span>
+      <span><b>Page</b>{pageLabel(project.page)}</span>
+      <span><b>Size</b>16:9 preview</span>
+      <span><b>FPS</b>{project.fps}</span>
+      <span><b>Length</b>{project.duration}s</span>
+      <span><b>Keyframes</b>{keyframes.length}</span>
+      <span><b>Weight</b>~{weight.movMb}MB</span>
+    </div>
+  )
+}
+
 function GraphEditor({ project, playhead, onSetCurve }) {
   const segment = getSegmentForTime(project, playhead)
   const activeId = segment?.keyframe?.curvePreset ?? 'linear'
   const active = curveById(activeId)
   const from = segment?.fromTime ?? 0
   const to = segment?.toTime ?? project.duration
+  const [open, setOpen] = useState(true)
 
   return (
     <div className="graph-editor color-panel-green">
-      <div className="mini-title no-gauge">
-        <span>Curve editor</span>
-        <strong>{from.toFixed(2)}s to {to.toFixed(2)}s</strong>
+      <div className="curve-header" onClick={() => setOpen((value) => !value)}>
+        <div>
+          <span>Curve editor</span>
+          <strong>{from.toFixed(2)}s to {to.toFixed(2)}s</strong>
+        </div>
+        <button>{open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
       </div>
-      <div className="curve-browser">
-        {curvePresets.map((curve) => (
-          <button className={curve.id === activeId ? 'curve-preset active' : 'curve-preset'} key={curve.id} onClick={() => onSetCurve(curve.id)}>
-            <svg viewBox="0 0 260 130" preserveAspectRatio="none"><path d={curve.path} /></svg>
-            <span>{curve.label}</span>
-          </button>
-        ))}
-      </div>
-      <div className="curve-large">
-        <div className="curve-topline"><span>{from.toFixed(1)}s</span><strong>{active.label}</strong><span>{to.toFixed(1)}s</span></div>
-        <svg viewBox="0 0 760 210" preserveAspectRatio="none">
-          <g className="grid-lines">
-            {Array.from({ length: 8 }, (_, i) => <line key={`v${i}`} x1={40 + i * 94} y1="24" x2={40 + i * 94} y2="184" />)}
-            {Array.from({ length: 5 }, (_, i) => <line key={`h${i}`} x1="40" y1={24 + i * 40} x2="720" y2={24 + i * 40} />)}
-          </g>
-          <path d={`M40 184 C${40 + active.curve[0] * 680} ${184 - active.curve[1] * 160}, ${40 + active.curve[2] * 680} ${184 - active.curve[3] * 160}, 720 24`} />
-          <circle cx={40 + active.curve[0] * 680} cy={184 - active.curve[1] * 160} r="5" />
-          <circle cx={40 + active.curve[2] * 680} cy={184 - active.curve[3] * 160} r="5" />
-        </svg>
-      </div>
+      <ProjectInfo project={project} />
+      {open && (
+        <>
+          <div className="curve-browser">
+            {curvePresets.map((curve) => (
+              <button className={curve.id === activeId ? 'curve-preset active' : 'curve-preset'} key={curve.id} onClick={() => onSetCurve(curve.id)}>
+                <svg viewBox="0 0 260 130" preserveAspectRatio="none"><path d={curve.path} /></svg>
+                <span>{curve.label}</span>
+              </button>
+            ))}
+          </div>
+          <div className="curve-large">
+            <div className="curve-topline"><span>{from.toFixed(1)}s</span><strong>{active.label}</strong><span>{to.toFixed(1)}s</span></div>
+            <svg viewBox="0 0 760 210" preserveAspectRatio="none">
+              <g className="grid-lines">
+                {Array.from({ length: 8 }, (_, i) => <line key={`v${i}`} x1={40 + i * 94} y1="24" x2={40 + i * 94} y2="184" />)}
+                {Array.from({ length: 5 }, (_, i) => <line key={`h${i}`} x1="40" y1={24 + i * 40} x2="720" y2={24 + i * 40} />)}
+              </g>
+              <path d={`M40 184 C${40 + active.curve[0] * 680} ${184 - active.curve[1] * 160}, ${40 + active.curve[2] * 680} ${184 - active.curve[3] * 160}, 720 24`} />
+              <circle cx={40 + active.curve[0] * 680} cy={184 - active.curve[1] * 160} r="5" />
+              <circle cx={40 + active.curve[2] * 680} cy={184 - active.curve[3] * 160} r="5" />
+            </svg>
+          </div>
+        </>
+      )}
     </div>
   )
 }
 
 function Inspector({ project, currentTransform, onPatchProject, onPatchTransform, onSetFrame, onSetCurve }) {
-  const weight = estimateWeight(project.duration, project.fps)
-
   return (
     <aside className="inspector inspector-split">
       <div className="panel-title"><SlidersHorizontal size={18} /><div><span>Inspector</span><strong>{project.name}</strong></div></div>
@@ -461,7 +519,6 @@ function Inspector({ project, currentTransform, onPatchProject, onPatchTransform
         <label>FPS<input type="number" min="24" max="120" step="1" value={project.fps} onChange={(event) => onPatchProject({ fps: Number(event.target.value) })} /></label>
         <label>Speed<input type="number" min="0.1" max="3" step="0.05" value={project.speed} onChange={(event) => onPatchProject({ speed: Number(event.target.value) })} /></label>
       </div>
-      <div className="weight-card color-panel-purple"><span>Estimated output</span><strong>{weight.movMb} MB MOV</strong><small>{weight.frames} frames / {weight.pngMb} MB PNG cache</small></div>
       <TransformEditor value={currentTransform} onChange={onPatchTransform} onSetFrame={onSetFrame} />
       <GraphEditor project={project} playhead={project.playhead ?? 0} onSetCurve={onSetCurve} />
     </aside>
@@ -477,6 +534,7 @@ export default function App() {
   const [timelineZoom, setTimelineZoom] = useState(1)
   const [viewportHint, setViewportHint] = useState('Move X/Y')
   const [rotateMode, setRotateMode] = useState(false)
+  const [wheelFocus, setWheelFocus] = useState(false)
   const rafRef = useRef(null)
   const startedAtRef = useRef(0)
   const basePlayheadRef = useRef(0)
@@ -614,11 +672,12 @@ export default function App() {
     dragRef.current = null
     window.clearTimeout(rotateTimerRef.current)
     if (!rotateMode) setViewportHint('Move X/Y')
+    setWheelFocus(false)
   }
 
   const handleViewportWheel = (event) => {
     event.preventDefault()
-    if (rotateMode) {
+    if (rotateMode || event.buttons === 2 || event.altKey) {
       const delta = event.deltaY > 0 ? 1 : -1
       if (event.shiftKey) {
         patchTransformAtPlayhead({ rotateX: Number((currentTransform.rotateX + delta).toFixed(1)) })
@@ -627,6 +686,10 @@ export default function App() {
         patchTransformAtPlayhead({ rotateY: Number((currentTransform.rotateY + delta).toFixed(1)) })
         setViewportHint('Rotate Y')
       }
+      return
+    }
+    if (!wheelFocus && event.buttons !== 1) {
+      setViewportHint('Click/hold window, then wheel')
       return
     }
     const delta = event.deltaY > 0 ? -0.02 : 0.02
@@ -642,14 +705,8 @@ export default function App() {
       </header>
 
       <main className="workspace">
-        <PresetPanel onOpen={() => setShowPresets(true)} />
+        <PresetPanel project={project} onOpen={() => setShowPresets(true)} />
         <section className="studio-center">
-          <SourceBinder
-            project={project}
-            onNew={() => setShowNew(true)}
-            onDetach={() => window.open(previewUrlForDetach(), 'inputlag-preview-detached', 'width=1280,height=800')}
-            onBind={(patch) => setProject((current) => ({ ...current, ...patch }))}
-          />
           <section className="preview-panel">
             <div className="section-header">
               <div><span>Live preview</span><strong>{project.name}</strong></div>
@@ -657,6 +714,8 @@ export default function App() {
                 <button onClick={() => setPlaying((value) => !value)}>{playing ? <Pause size={16} /> : <Play size={16} />} {playing ? 'Pause' : 'Play'}</button>
                 <input type="range" min="0" max={project.duration} step="0.01" value={playhead} onChange={(event) => setPlayhead(Number(event.target.value))} />
                 <span>{playhead.toFixed(2)}s</span>
+                <button onClick={() => window.open(previewUrlForDetach(), 'inputlag-preview-detached', 'width=1280,height=800')}><ExternalLink size={15} /> Detach</button>
+                <SourceBinder project={project} onBind={(patch) => setProject((current) => ({ ...current, ...patch }))} />
               </div>
               <div className="preview-badges"><span>{pageLabel(project.page)}</span><span>{project.fps} fps</span><span>{project.duration}s</span></div>
             </div>
@@ -667,6 +726,8 @@ export default function App() {
                 onPointerMove={handleViewportPointerMove}
                 onPointerUp={clearViewportPointer}
                 onPointerCancel={clearViewportPointer}
+                onMouseEnter={() => setWheelFocus(true)}
+                onMouseLeave={() => setWheelFocus(false)}
                 onWheel={handleViewportWheel}
                 onContextMenu={(event) => event.preventDefault()}
                 style={{ transform: `perspective(${currentTransform.perspective}px) translate(${currentTransform.x}px, ${currentTransform.y}px) scale(${currentTransform.scale}) rotateX(${currentTransform.rotateX}deg) rotateY(${currentTransform.rotateY}deg) rotateZ(${currentTransform.rotateZ}deg)` }}
@@ -685,12 +746,6 @@ export default function App() {
             onSetFrame={() => setFrameAtPlayhead()}
             onDragKeyframe={dragKeyframe}
           />
-          <section className="workbox">
-            <div className="section-header"><div><span>Box</span><strong>ready loops</strong></div><Boxes size={18} /></div>
-            <div className="loop-grid">
-              {workboxLoops.map((loop) => <div className="loop-card" key={loop.name}><Film size={18} /><div><strong>{loop.name}</strong><span>{loop.page} / {loop.length}</span></div><em className={loop.status}>{loop.status}</em></div>)}
-            </div>
-          </section>
         </section>
         <Inspector
           project={projectWithPlayhead}
