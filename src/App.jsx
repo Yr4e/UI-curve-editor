@@ -464,6 +464,7 @@ function Timeline({ project, playhead, zoom, selectedKeyframeId, selectedActionI
                   onPointerDown={(event) => {
                     event.stopPropagation()
                     onSelectKeyframe(keyframe.id)
+                    onSeek(keyframe.time)
                     event.currentTarget.setPointerCapture(event.pointerId)
                     const rect = trackRef.current.getBoundingClientRect()
                     const move = (moveEvent) => {
@@ -495,6 +496,7 @@ function Timeline({ project, playhead, zoom, selectedKeyframeId, selectedActionI
                   onPointerDown={(event) => {
                     event.stopPropagation()
                     onSelectAction(action.id)
+                    onSeek(action.time)
                     event.currentTarget.setPointerCapture(event.pointerId)
                     const rect = trackRef.current.getBoundingClientRect()
                     const move = (moveEvent) => {
@@ -559,7 +561,7 @@ function TransformEditor({ value, onChange, onResetSelected, canReset }) {
       <div className="mini-title">
         <span>Transform</span>
         <div className="mini-title-actions">
-          <button className="reset-frame-btn" disabled={!canReset} onClick={onResetSelected}><RotateCcw size={15} /> Reset position</button>
+          <button className="reset-frame-btn" disabled={!canReset} onClick={onResetSelected}>Reset position</button>
         </div>
       </div>
       {rows.map(({ key, min, max, step, labels }) => (
@@ -582,7 +584,15 @@ function TransformEditor({ value, onChange, onResetSelected, canReset }) {
               {labels.map((label) => <i key={label}><em>{label}</em></i>)}
             </div>
           </div>
-          <b>{value[key]}</b>
+          <input
+            className="transform-value-input"
+            value={value[key]}
+            onChange={(event) => {
+              const raw = Number(event.target.value)
+              if (Number.isNaN(raw)) return
+              onChange({ [key]: formatValue(key, clamp(raw, min, max)) })
+            }}
+          />
         </label>
       ))}
     </div>
@@ -1061,11 +1071,11 @@ export default function App() {
           <img src="./curve-editor-logo-transparent.png" alt="Inputlag Curve Editor" />
         </div>
         <div className="topbar-slash" />
+        <div className="topbar-center-mark"><img src="./app-icon.png" alt="" /></div>
         <ProjectMeta project={project} />
         <div className="top-actions">
           <button className="icon-action ready-presets-top" title="Ready Presets" onClick={() => setShowPresets(true)}><Sparkles size={17} /></button>
           <button className="icon-action" title="Code" onClick={() => setShowCode((value) => !value)}><Code2 size={17} /></button>
-          <button className="icon-action edit-action" title="Edit project" onClick={() => setShowEdit(true)}><Edit3 size={16} /></button>
           <button onClick={() => setShowNew(true)}><Plus size={16} /> New</button>
           <button className="render-action" disabled={rendering} onClick={exportMov}><Download size={16} /> Render MOV</button>
         </div>
@@ -1082,6 +1092,7 @@ export default function App() {
             <div className="section-header">
               <div><span>Live preview</span></div>
               <div className="preview-controls">
+                <button className="preview-edit" title="Edit project" onClick={() => setShowEdit(true)}><Edit3 size={16} /></button>
                 <button className="preview-play" onClick={() => setPlaying((value) => !value)}>{playing ? <Pause size={16} /> : <Play size={16} />} {playing ? 'Pause' : 'Play'}</button>
                 <input type="range" min="0" max={project.duration} step="0.01" value={playhead} onChange={(event) => setPlayhead(Number(event.target.value))} />
                 <span>{playhead.toFixed(2)}s</span>
