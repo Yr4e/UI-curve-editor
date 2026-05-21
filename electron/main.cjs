@@ -26,7 +26,8 @@ function createWindow() {
     minWidth: 1280,
     minHeight: 760,
     title: 'Curvy Editor',
-    backgroundColor: '#05070b',
+    backgroundColor: '#00000000',
+    transparent: true,
     autoHideMenuBar: true,
     show: false,
     webPreferences: {

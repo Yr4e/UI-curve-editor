@@ -192,7 +192,8 @@ function NewProjectModal({ open, onClose, onCreate }) {
   )
 }
 
-function InputLagWindow({ project, page }) {
+function InputLagWindow({ project, page, onAppAction }) {
+  const frameRef = useRef(null)
   const routeMap = {
     'control-center': '/center',
     boost: '/boost',
@@ -214,9 +215,52 @@ function InputLagWindow({ project, page }) {
     ? source
     : `${cleanSource}?renderCapture=boost-ai&studioPreview=1&page=${renderPageMap[page] ?? 'boost'}#${routeMap[page] ?? '/center'}`
 
+  useEffect(() => {
+    const frame = frameRef.current
+    if (!frame) return undefined
+    let cleanup = () => {}
+    const bind = () => {
+      try {
+        const doc = frame.contentDocument
+        if (!doc) return
+        const handler = (event) => {
+          const target = event.target?.closest?.('button, [role="button"], a, input, select, textarea, [data-action], .toggle, .switch, .tweak-row')
+          if (!target) return
+          const label = (target.innerText || target.getAttribute('aria-label') || target.getAttribute('title') || target.value || target.className || target.tagName || 'app action')
+            .toString()
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 120)
+          const selector = target.id
+            ? `#${target.id}`
+            : target.className && typeof target.className === 'string'
+              ? `${target.tagName.toLowerCase()}.${target.className.split(/\s+/).filter(Boolean).slice(0, 3).join('.')}`
+              : target.tagName.toLowerCase()
+          onAppAction?.({
+            type: target.tagName === 'A' ? 'navigate' : target.tagName === 'INPUT' ? 'input' : 'click',
+            label: label || selector,
+            selector,
+            page,
+            route: frame.contentWindow?.location?.hash || '',
+          })
+        }
+        doc.addEventListener('click', handler, true)
+        cleanup = () => doc.removeEventListener('click', handler, true)
+      } catch {
+        cleanup = () => {}
+      }
+    }
+    frame.addEventListener('load', bind)
+    bind()
+    return () => {
+      frame.removeEventListener('load', bind)
+      cleanup()
+    }
+  }, [page, pageUrl, onAppAction])
+
   return (
     <div className="preview-shell">
-      <iframe className="inputlag-frame" title="InputLag preview" src={pageUrl} />
+      <iframe ref={frameRef} className="inputlag-frame" title="InputLag preview" src={pageUrl} />
     </div>
   )
 }
@@ -316,6 +360,9 @@ function CodePanel({ project, playhead, onClose }) {
           duration: action.duration,
           type: action.type,
           label: action.label,
+          selector: action.selector ?? null,
+          page: action.page ?? null,
+          route: action.route ?? null,
           preset: action.preset ?? null,
           category: action.category ?? 'app',
         })),
@@ -384,7 +431,7 @@ function Timeline({ project, playhead, zoom, selectedKeyframeId, onZoom, onSeek,
         </div>
         <div className="timeline-actions">
           <span>Ctrl + wheel zoom {zoom.toFixed(2)}x</span>
-          <button className="set-frame-btn" onClick={onSetFrame}><Plus size={15} /> Set frame</button>
+          <button className="set-frame-btn" onClick={onSetFrame}>Set frame</button>
           <button className="delete-frame-btn" disabled={!selectedKeyframeId} onClick={onDeleteSelected}><Trash2 size={15} /> Delete frame</button>
         </div>
       </div>
@@ -392,7 +439,11 @@ function Timeline({ project, playhead, zoom, selectedKeyframeId, onZoom, onSeek,
         <div className="timeline-inner" style={{ width: contentWidth }} ref={trackRef}>
           <div className="timeline-ruler clean-ruler" onPointerDown={beginScrub}>
             {marks.map((mark) => (
-              <span key={mark} className={Number.isInteger(mark) ? 'major-tick' : 'minor-tick'} style={{ left: `${(mark / duration) * 100}%` }}>
+              <span
+                key={mark}
+                className={`${Number.isInteger(mark) ? 'major-tick' : 'minor-tick'}${mark === 0 ? ' edge-start' : ''}${Math.abs(mark - duration) < 0.001 ? ' edge-end' : ''}`}
+                style={{ left: `${(mark / duration) * 100}%` }}
+              >
                 {mark % 1 === 0 ? `${mark.toFixed(0)}s` : `${mark.toFixed(1)}s`}
               </span>
             ))}
@@ -451,7 +502,7 @@ function Timeline({ project, playhead, zoom, selectedKeyframeId, onZoom, onSeek,
   )
 }
 
-function TransformEditor({ value, onChange, onSetFrame, onResetSelected, canReset }) {
+function TransformEditor({ value, onChange, onResetSelected, canReset }) {
   const rows = [['x', -600, 600], ['y', -360, 360], ['scale', 0.35, 1.8], ['rotateX', -55, 55], ['rotateY', -55, 55], ['rotateZ', -40, 40], ['perspective', 700, 2600]]
 
   return (
@@ -459,8 +510,7 @@ function TransformEditor({ value, onChange, onSetFrame, onResetSelected, canRese
       <div className="mini-title">
         <span>Transform</span>
         <div className="mini-title-actions">
-          <button onClick={onSetFrame}>Set frame</button>
-          <button disabled={!canReset} onClick={onResetSelected}>Reset</button>
+          <button className="reset-frame-btn" disabled={!canReset} onClick={onResetSelected}>Reset position</button>
         </div>
       </div>
       {rows.map(([key, min, max]) => (
@@ -515,7 +565,7 @@ function Inspector({ project, currentTransform, selectedKeyframeId, onPatchProje
         <label>FPS<input type="number" min="24" max="120" step="1" value={project.fps} onChange={(event) => onPatchProject({ fps: Number(event.target.value) })} /></label>
         <label>Speed<input type="number" min="0.1" max="3" step="0.05" value={project.speed} onChange={(event) => onPatchProject({ speed: Number(event.target.value) })} /></label>
       </div>
-      <TransformEditor value={currentTransform} onChange={onPatchTransform} onSetFrame={onSetFrame} onResetSelected={onResetSelected} canReset={Boolean(selectedKeyframeId)} />
+      <TransformEditor value={currentTransform} onChange={onPatchTransform} onResetSelected={onResetSelected} canReset={Boolean(selectedKeyframeId)} />
       <div className="control-hint">
         <strong>Controls</strong>
         <span>LMB drag: move X/Y</span>
@@ -538,6 +588,7 @@ export default function App() {
   const [timelineZoom, setTimelineZoom] = useState(1)
   const [viewportHint, setViewportHint] = useState('Move X/Y')
   const [renderStatus, setRenderStatus] = useState('')
+  const [rendering, setRendering] = useState(false)
   const [rotateMode, setRotateMode] = useState(false)
   const [selectedKeyframeId, setSelectedKeyframeId] = useState(null)
   const rafRef = useRef(null)
@@ -570,6 +621,15 @@ export default function App() {
       setPlayhead(Number((clamp(time / project.duration) * project.duration).toFixed(3)))
     })
   }, [project.duration])
+
+  useEffect(() => {
+    const handler = (event) => {
+      if (event.data?.source !== 'inputlag-studio-preview' || !event.data.action) return
+      recordAppAction({ ...event.data.action, page: project.page })
+    }
+    window.addEventListener('message', handler)
+    return () => window.removeEventListener('message', handler)
+  }, [playhead, project.duration, project.page])
 
   useEffect(() => {
     if (!playing) return undefined
@@ -724,6 +784,39 @@ export default function App() {
     setSelectedKeyframeId(newKeyframe.id)
   }
 
+  const recordAppAction = (action) => {
+    const time = Number(Math.max(0, Math.min(project.duration, playhead)).toFixed(3))
+    setProject((current) => {
+      const last = current.actionTrack.actions[current.actionTrack.actions.length - 1]
+      if (
+        last &&
+        Math.abs(last.time - time) < 0.02 &&
+        last.type === action.type &&
+        last.label === action.label &&
+        last.selector === action.selector
+      ) {
+        return current
+      }
+      return {
+        ...current,
+        actionTrack: {
+          ...current.actionTrack,
+          actions: [...current.actionTrack.actions, {
+            id: crypto.randomUUID(),
+            time,
+            duration: 0.35,
+            type: action.type,
+            label: action.label,
+            selector: action.selector,
+            page: action.page,
+            route: action.route,
+            category: 'recorded',
+          }].sort((a, b) => a.time - b.time),
+        },
+      }
+    })
+  }
+
   const createProject = ({ name, duration, presetId }) => {
     setProject(makeProject({ name, duration, presetId }))
     setPlayhead(0)
@@ -789,28 +882,34 @@ export default function App() {
       setRenderStatus('Render works in desktop build')
       return
     }
+    setRendering(true)
     setRenderStatus('Rendering...')
-    const canvasRect = document.querySelector('.preview-canvas')?.getBoundingClientRect()
-    const rect = canvasRect
-      ? { x: Math.round(canvasRect.x), y: Math.round(canvasRect.y), width: Math.round(canvasRect.width), height: Math.round(canvasRect.height) }
+    document.body.classList.add('render-alpha')
+    const windowRect = document.querySelector('.preview-transform')?.getBoundingClientRect()
+    const rect = windowRect
+      ? { x: Math.round(windowRect.x), y: Math.round(windowRect.y), width: Math.round(windowRect.width), height: Math.round(windowRect.height) }
       : null
-    const result = await window.curvy.renderMov({
-      project: {
-        name: project.name,
-        duration: project.duration,
-        fps: project.fps,
-      },
-      rect,
-    })
-    setRenderStatus(result?.ok ? `Rendered: ${result.output}` : `Render failed: ${result?.error || 'unknown error'}`)
+    try {
+      const result = await window.curvy.renderMov({
+        project: {
+          name: project.name,
+          duration: project.duration,
+          fps: project.fps,
+        },
+        rect,
+      })
+      setRenderStatus(result?.ok ? `Rendered: ${result.output}` : `Render failed: ${result?.error || 'unknown error'}`)
+    } finally {
+      document.body.classList.remove('render-alpha')
+      setRendering(false)
+    }
   }
 
   return (
-    <div className="studio-app">
+    <div className={rendering ? 'studio-app is-rendering' : 'studio-app'}>
       <header className="topbar split-topbar">
         <div className="app-logo">
-          <span className="il-mark">IL</span>
-          <div><strong>Inputlag</strong><small>Curve Editor</small></div>
+          <img src="./curve-editor-logo.svg" alt="Inputlag Curve Editor" />
         </div>
         <div className="topbar-slash" />
         <ProjectMeta project={project} />
@@ -819,7 +918,7 @@ export default function App() {
           <button className="icon-action" title="Code" onClick={() => setShowCode((value) => !value)}><Code2 size={17} /></button>
           <button className="icon-action play-square" title="Play" onClick={() => setPlaying((value) => !value)}>{playing ? <Pause size={17} /> : <Play size={17} />}</button>
           <button onClick={() => setShowNew(true)}><Plus size={16} /> New</button>
-          <button className="render-action" onClick={exportMov}><Download size={16} /> Render MOV</button>
+          <button className="render-action" disabled={rendering} onClick={exportMov}><Download size={16} /> Render MOV</button>
         </div>
       </header>
 
@@ -846,9 +945,10 @@ export default function App() {
                 style={{ transform: `perspective(${currentTransform.perspective}px) translate(${currentTransform.x}px, ${currentTransform.y}px) scale(${currentTransform.scale}) rotateX(${currentTransform.rotateX}deg) rotateY(${currentTransform.rotateY}deg) rotateZ(${currentTransform.rotateZ}deg)` }}
               >
                 <div className="viewport-hint">{viewportHint}</div>
-                <InputLagWindow project={project} page={project.page} />
+                <InputLagWindow project={project} page={project.page} onAppAction={recordAppAction} />
               </div>
               {renderStatus && <div className="render-status">{renderStatus}</div>}
+              {rendering && <div className="render-blocker">Rendering MOV...</div>}
             </div>
           </section>
           <Timeline
