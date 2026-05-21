@@ -43,7 +43,7 @@
       "target": [
         "portable"
       ],
-      "artifactName": "Curvy-Editor-${version}.exe"
+      "artifactName": "InputLag-Render-Studio-${version}.exe"
     }
   }
 }
