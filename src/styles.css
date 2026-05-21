@@ -2597,7 +2597,10 @@ select {
 }
 
 .app-logo img {
-  width: 236px;
+  width: 250px;
+  max-height: 48px;
+  object-fit: contain;
+  object-position: left center;
 }
 
 .topbar {

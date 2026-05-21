@@ -966,7 +966,7 @@ export default function App() {
     <div className={rendering ? 'studio-app is-rendering' : 'studio-app'}>
       <header className="topbar split-topbar">
         <div className="app-logo">
-          <img src="./curve-editor-logo.svg" alt="Inputlag Curve Editor" />
+          <img src="./curve-editor-logo.png" alt="Inputlag Curve Editor" />
         </div>
         <div className="topbar-slash" />
         <ProjectMeta project={project} />
