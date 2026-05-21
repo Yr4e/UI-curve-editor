@@ -60,6 +60,21 @@ function createWindow() {
 
 app.whenReady().then(createWindow)
 
+ipcMain.on('window:minimize', (event) => {
+  BrowserWindow.fromWebContents(event.sender)?.minimize()
+})
+
+ipcMain.on('window:maximize', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win) return
+  if (win.isMaximized()) win.unmaximize()
+  else win.maximize()
+})
+
+ipcMain.on('window:close', (event) => {
+  BrowserWindow.fromWebContents(event.sender)?.close()
+})
+
 ipcMain.handle('render:mov', async (event, payload = {}) => {
   const win = BrowserWindow.fromWebContents(event.sender)
   if (!win) return { ok: false, error: 'No active editor window' }

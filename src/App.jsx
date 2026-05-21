@@ -2,11 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Code2,
   Download,
+  Minus,
   Pause,
   Play,
   Plus,
   Rotate3D,
   SlidersHorizontal,
+  Square,
   Sparkles,
   Trash2,
   X,
@@ -62,15 +64,15 @@ const estimateWeight = (duration, fps) => {
   return { frames, pngMb: Math.round(frames * 1.15), movMb: Math.round(frames * 0.85) }
 }
 
-const makeProject = ({ name = 'InputLag Project', duration = 6, presetId = 'empty' } = {}) => {
+const makeProject = ({ name = 'InputLag Project', duration = 6, fps, speed, page, presetId = 'empty' } = {}) => {
   const preset = presetTemplates.find((item) => item.id === presetId)
   const base = preset ? { ...preset.start, scale: Math.max(preset.start.scale, 0.86) } : { ...defaultTransform }
   return {
     name,
     duration: preset?.duration ?? duration,
-    fps: preset?.fps ?? 60,
-    speed: preset?.speed ?? 1,
-    page: preset?.page ?? 'boost',
+    fps: fps ?? preset?.fps ?? 60,
+    speed: speed ?? preset?.speed ?? 1,
+    page: page ?? preset?.page ?? 'boost',
     sourceUrl: inputLagPreviewUrl,
     sourceName: 'C:/Users/yr4e/inputlag.ai-main/renderer',
     sourceFiles: 0,
@@ -163,7 +165,10 @@ function ProjectMeta({ project }) {
 
 function NewProjectModal({ open, onClose, onCreate }) {
   const [name, setName] = useState('InputLag Project')
-  const [duration, setDuration] = useState(6)
+  const [duration, setDuration] = useState('6')
+  const [fps, setFps] = useState('60')
+  const [speed, setSpeed] = useState('1')
+  const [page, setPage] = useState('boost')
   const [presetId, setPresetId] = useState('empty')
 
   if (!open) return null
@@ -175,7 +180,12 @@ function NewProjectModal({ open, onClose, onCreate }) {
           <strong>Project setup</strong>
         </div>
         <label>Project name<input value={name} onChange={(event) => setName(event.target.value)} /></label>
-        <label>Length, seconds<input type="number" min="1" max="90" step="0.1" value={duration} onChange={(event) => setDuration(Number(event.target.value))} /></label>
+        <div className="modal-field-grid">
+          <label>Page<select value={page} onChange={(event) => setPage(event.target.value)}>{pages.filter((item) => item.id !== 'logo').map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
+          <label>Duration<input type="number" min="1" max="90" step="0.1" value={duration} onChange={(event) => setDuration(event.target.value)} /></label>
+          <label>FPS<input type="number" min="24" max="120" step="1" value={fps} onChange={(event) => setFps(event.target.value)} /></label>
+          <label>Speed<input type="number" min="0.1" max="3" step="0.05" value={speed} onChange={(event) => setSpeed(event.target.value)} /></label>
+        </div>
         <label>
           Starting preset
           <select value={presetId} onChange={(event) => setPresetId(event.target.value)}>
@@ -185,14 +195,21 @@ function NewProjectModal({ open, onClose, onCreate }) {
         </label>
         <div className="modal-actions">
           <button onClick={onClose}>Cancel</button>
-          <button onClick={() => onCreate({ name, duration, presetId })}>Create</button>
+          <button onClick={() => onCreate({
+            name,
+            duration: Number(duration) || 6,
+            fps: Number(fps) || 60,
+            speed: Number(speed) || 1,
+            page,
+            presetId,
+          })}>Create</button>
         </div>
       </div>
     </div>
   )
 }
 
-function InputLagWindow({ project, page, onAppAction }) {
+function InputLagWindow({ project, page, replayCommand, resetToken }) {
   const frameRef = useRef(null)
   const routeMap = {
     'control-center': '/center',
@@ -213,50 +230,16 @@ function InputLagWindow({ project, page, onAppAction }) {
     : source.replace(/[?#].*$/, '').replace(/\/?$/, '/')
   const pageUrl = source.startsWith('blob:')
     ? source
-    : `${cleanSource}?renderCapture=boost-ai&studioPreview=1&page=${renderPageMap[page] ?? 'boost'}#${routeMap[page] ?? '/center'}`
+    : `${cleanSource}?renderCapture=boost-ai&studioPreview=1&page=${renderPageMap[page] ?? 'boost'}&studioReset=${resetToken}#${routeMap[page] ?? '/center'}`
 
   useEffect(() => {
-    const frame = frameRef.current
-    if (!frame) return undefined
-    let cleanup = () => {}
-    const bind = () => {
-      try {
-        const doc = frame.contentDocument
-        if (!doc) return
-        const handler = (event) => {
-          const target = event.target?.closest?.('button, [role="button"], a, input, select, textarea, [data-action], .toggle, .switch, .tweak-row')
-          if (!target) return
-          const label = (target.innerText || target.getAttribute('aria-label') || target.getAttribute('title') || target.value || target.className || target.tagName || 'app action')
-            .toString()
-            .replace(/\s+/g, ' ')
-            .trim()
-            .slice(0, 120)
-          const selector = target.id
-            ? `#${target.id}`
-            : target.className && typeof target.className === 'string'
-              ? `${target.tagName.toLowerCase()}.${target.className.split(/\s+/).filter(Boolean).slice(0, 3).join('.')}`
-              : target.tagName.toLowerCase()
-          onAppAction?.({
-            type: target.tagName === 'A' ? 'navigate' : target.tagName === 'INPUT' ? 'input' : 'click',
-            label: label || selector,
-            selector,
-            page,
-            route: frame.contentWindow?.location?.hash || '',
-          })
-        }
-        doc.addEventListener('click', handler, true)
-        cleanup = () => doc.removeEventListener('click', handler, true)
-      } catch {
-        cleanup = () => {}
-      }
-    }
-    frame.addEventListener('load', bind)
-    bind()
-    return () => {
-      frame.removeEventListener('load', bind)
-      cleanup()
-    }
-  }, [page, pageUrl, onAppAction])
+    if (!replayCommand?.action || !frameRef.current?.contentWindow) return
+    frameRef.current.contentWindow.postMessage({
+      source: 'curvy-editor',
+      command: 'replay-action',
+      action: replayCommand.action,
+    }, '*')
+  }, [replayCommand])
 
   return (
     <div className="preview-shell">
@@ -363,6 +346,8 @@ function CodePanel({ project, playhead, onClose }) {
           selector: action.selector ?? null,
           page: action.page ?? null,
           route: action.route ?? null,
+          scrollTop: action.scrollTop ?? null,
+          scrollLeft: action.scrollLeft ?? null,
           preset: action.preset ?? null,
           category: action.category ?? 'app',
         })),
@@ -386,7 +371,7 @@ function CodePanel({ project, playhead, onClose }) {
   )
 }
 
-function Timeline({ project, playhead, zoom, selectedKeyframeId, onZoom, onSeek, onSetFrame, onDragKeyframe, onDeleteKeyframe, onSelectKeyframe, onDeleteAction, onDeleteSelected }) {
+function Timeline({ project, playhead, zoom, selectedKeyframeId, selectedActionId, onZoom, onSeek, onSetFrame, onDragKeyframe, onSelectKeyframe, onSelectAction, onDragAction, onDeleteSelected }) {
   const trackRef = useRef(null)
   const duration = Math.max(project.duration, 1)
   const tickStep = 0.5
@@ -432,7 +417,7 @@ function Timeline({ project, playhead, zoom, selectedKeyframeId, onZoom, onSeek,
         <div className="timeline-actions">
           <span>Ctrl + wheel zoom {zoom.toFixed(2)}x</span>
           <button className="set-frame-btn" onClick={onSetFrame}>Set frame</button>
-          <button className="delete-frame-btn" disabled={!selectedKeyframeId} onClick={onDeleteSelected}><Trash2 size={15} /> Delete frame</button>
+          <button className="delete-frame-btn" disabled={!selectedKeyframeId && !selectedActionId} onClick={onDeleteSelected}><Trash2 size={15} /> Delete selected</button>
         </div>
       </div>
       <div className="timeline-scroll">
@@ -458,7 +443,6 @@ function Timeline({ project, playhead, zoom, selectedKeyframeId, onZoom, onSeek,
                   style={{ left: `${(keyframe.time / duration) * 100}%` }}
                   title={`${keyframe.time}s / ${keyframe.curvePreset}`}
                   onClick={(event) => { event.stopPropagation(); onSelectKeyframe(keyframe.id); onSeek(keyframe.time) }}
-                  onDoubleClick={(event) => { event.stopPropagation(); onDeleteKeyframe(keyframe.id) }}
                   onPointerDown={(event) => {
                     event.stopPropagation()
                     onSelectKeyframe(keyframe.id)
@@ -484,13 +468,29 @@ function Timeline({ project, playhead, zoom, selectedKeyframeId, onZoom, onSeek,
             <div className="track-lane">
               {sortedActions(project).map((action) => (
                 <button
-                  className="action-chip"
+                  className={selectedActionId === action.id ? 'action-chip active' : 'action-chip'}
                   key={action.id}
                   style={{ left: `${(action.time / duration) * 100}%`, width: `${Math.max((action.duration / duration) * 100, 3)}%` }}
-                  title={`${action.time}s / ${action.type}`}
-                  onDoubleClick={(event) => { event.stopPropagation(); onDeleteAction(action.id) }}
+                  title={`${action.time}s / ${action.label || action.type}`}
+                  onClick={(event) => { event.stopPropagation(); onSelectAction(action.id); onSeek(action.time) }}
+                  onPointerDown={(event) => {
+                    event.stopPropagation()
+                    onSelectAction(action.id)
+                    event.currentTarget.setPointerCapture(event.pointerId)
+                    const rect = trackRef.current.getBoundingClientRect()
+                    const move = (moveEvent) => {
+                      const pct = clamp((moveEvent.clientX - rect.left) / rect.width)
+                      onDragAction(action.id, Number((pct * duration).toFixed(3)))
+                    }
+                    const up = () => {
+                      window.removeEventListener('pointermove', move)
+                      window.removeEventListener('pointerup', up)
+                    }
+                    window.addEventListener('pointermove', move)
+                    window.addEventListener('pointerup', up)
+                  }}
                 >
-                  {action.type}
+                  {action.type === 'scroll' ? 'scroll' : action.label || action.type}
                 </button>
               ))}
             </div>
@@ -559,12 +559,6 @@ function Inspector({ project, currentTransform, selectedKeyframeId, onPatchProje
         <SlidersHorizontal size={18} />
         <div><span>Inspector</span><strong>{project.name}</strong></div>
       </div>
-      <div className="field-grid">
-        <label>Page<select value={project.page} onChange={(event) => onPatchProject({ page: event.target.value })}>{pages.filter((page) => page.id !== 'logo').map((page) => <option key={page.id} value={page.id}>{page.label}</option>)}</select></label>
-        <label>Duration<input type="number" min="1" max="90" step="0.1" value={project.duration} onChange={(event) => onPatchProject({ duration: Number(event.target.value) })} /></label>
-        <label>FPS<input type="number" min="24" max="120" step="1" value={project.fps} onChange={(event) => onPatchProject({ fps: Number(event.target.value) })} /></label>
-        <label>Speed<input type="number" min="0.1" max="3" step="0.05" value={project.speed} onChange={(event) => onPatchProject({ speed: Number(event.target.value) })} /></label>
-      </div>
       <TransformEditor value={currentTransform} onChange={onPatchTransform} onResetSelected={onResetSelected} canReset={Boolean(selectedKeyframeId)} />
       <div className="control-hint">
         <strong>Controls</strong>
@@ -591,9 +585,13 @@ export default function App() {
   const [rendering, setRendering] = useState(false)
   const [rotateMode, setRotateMode] = useState(false)
   const [selectedKeyframeId, setSelectedKeyframeId] = useState(null)
+  const [selectedActionId, setSelectedActionId] = useState(null)
+  const [previewResetToken, setPreviewResetToken] = useState(0)
+  const [replayCommand, setReplayCommand] = useState(null)
   const rafRef = useRef(null)
   const startedAtRef = useRef(0)
   const basePlayheadRef = useRef(0)
+  const playbackLastTimeRef = useRef(0)
   const dragRef = useRef(null)
   const rotateTimerRef = useRef(null)
   const wheelFrameRef = useRef(null)
@@ -625,11 +623,12 @@ export default function App() {
   useEffect(() => {
     const handler = (event) => {
       if (event.data?.source !== 'inputlag-studio-preview' || !event.data.action) return
+      if (playing) return
       recordAppAction({ ...event.data.action, page: project.page })
     }
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
-  }, [playhead, project.duration, project.page])
+  }, [playing, playhead, project.duration, project.page])
 
   useEffect(() => {
     if (!playing) return undefined
@@ -643,6 +642,32 @@ export default function App() {
     rafRef.current = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(rafRef.current)
   }, [playing, project.duration, project.speed])
+
+  useEffect(() => {
+    if (!playing) {
+      playbackLastTimeRef.current = playhead
+      return
+    }
+    setPreviewResetToken((value) => value + 1)
+    playbackLastTimeRef.current = Math.max(0, playhead - 0.001)
+  }, [playing])
+
+  useEffect(() => {
+    if (!playing) return
+    const previous = playbackLastTimeRef.current
+    if (playhead < previous) {
+      setPreviewResetToken((value) => value + 1)
+      playbackLastTimeRef.current = Math.max(0, playhead - 0.001)
+      return
+    }
+    const dueActions = sortedActions(project).filter((action) => action.time > previous && action.time <= playhead + 0.012)
+    dueActions.forEach((action, index) => {
+      window.setTimeout(() => {
+        setReplayCommand({ id: crypto.randomUUID(), action })
+      }, index * 40)
+    })
+    playbackLastTimeRef.current = playhead
+  }, [playing, playhead, project])
 
   const setFrameAtPlayhead = (transform = currentTransform, extra = {}) => {
     let nextId = selectedKeyframeId
@@ -699,6 +724,20 @@ export default function App() {
     }))
   }
 
+  const dragAction = (id, time) => {
+    const nextTime = Number((clamp(time / project.duration) * project.duration).toFixed(3))
+    setPlayhead(nextTime)
+    setSelectedActionId(id)
+    setSelectedKeyframeId(null)
+    setProject((current) => ({
+      ...current,
+      actionTrack: {
+        ...current.actionTrack,
+        actions: current.actionTrack.actions.map((action) => action.id === id ? { ...action, time: nextTime } : action).sort((a, b) => a.time - b.time),
+      },
+    }))
+  }
+
   const deleteKeyframe = (id) => {
     setProject((current) => ({
       ...current,
@@ -731,6 +770,15 @@ export default function App() {
         actions: current.actionTrack.actions.filter((action) => action.id !== id),
       },
     }))
+    if (selectedActionId === id) setSelectedActionId(null)
+  }
+
+  const deleteSelectedTimelineItem = () => {
+    if (selectedKeyframeId) {
+      deleteKeyframe(selectedKeyframeId)
+      return
+    }
+    if (selectedActionId) deleteAction(selectedActionId)
   }
 
   const setCurveForSegment = (curvePreset) => {
@@ -786,23 +834,27 @@ export default function App() {
 
   const recordAppAction = (action) => {
     const time = Number(Math.max(0, Math.min(project.duration, playhead)).toFixed(3))
+    let nextId = null
     setProject((current) => {
       const last = current.actionTrack.actions[current.actionTrack.actions.length - 1]
       if (
         last &&
-        Math.abs(last.time - time) < 0.02 &&
+        Math.abs(last.time - time) < (action.type === 'scroll' ? 0.35 : 0.02) &&
         last.type === action.type &&
         last.label === action.label &&
-        last.selector === action.selector
+        last.selector === action.selector &&
+        (action.type !== 'scroll' || Math.abs((last.scrollTop ?? 0) - (action.scrollTop ?? 0)) < 18)
       ) {
+        nextId = last.id
         return current
       }
+      nextId = crypto.randomUUID()
       return {
         ...current,
         actionTrack: {
           ...current.actionTrack,
           actions: [...current.actionTrack.actions, {
-            id: crypto.randomUUID(),
+            id: nextId,
             time,
             duration: 0.35,
             type: action.type,
@@ -810,18 +862,23 @@ export default function App() {
             selector: action.selector,
             page: action.page,
             route: action.route,
+            scrollTop: action.scrollTop,
+            scrollLeft: action.scrollLeft,
             category: 'recorded',
           }].sort((a, b) => a.time - b.time),
         },
       }
     })
+    setSelectedActionId(nextId)
+    setSelectedKeyframeId(null)
   }
 
-  const createProject = ({ name, duration, presetId }) => {
-    setProject(makeProject({ name, duration, presetId }))
+  const createProject = ({ name, duration, fps, speed, page, presetId }) => {
+    setProject(makeProject({ name, duration, fps, speed, page, presetId }))
     setPlayhead(0)
     setPlaying(false)
     setSelectedKeyframeId(null)
+    setSelectedActionId(null)
     setShowNew(false)
   }
 
@@ -916,9 +973,13 @@ export default function App() {
         <div className="top-actions">
           <button className="icon-action ready-presets-top" title="Ready Presets" onClick={() => setShowPresets(true)}><Sparkles size={17} /></button>
           <button className="icon-action" title="Code" onClick={() => setShowCode((value) => !value)}><Code2 size={17} /></button>
-          <button className="icon-action play-square" title="Play" onClick={() => setPlaying((value) => !value)}>{playing ? <Pause size={17} /> : <Play size={17} />}</button>
           <button onClick={() => setShowNew(true)}><Plus size={16} /> New</button>
           <button className="render-action" disabled={rendering} onClick={exportMov}><Download size={16} /> Render MOV</button>
+        </div>
+        <div className="window-controls">
+          <button title="Minimize" onClick={() => window.curvy?.minimize?.()}><Minus size={13} /></button>
+          <button title="Maximize" onClick={() => window.curvy?.maximize?.()}><Square size={12} /></button>
+          <button title="Close" onClick={() => window.curvy?.close?.()}><X size={14} /></button>
         </div>
       </header>
 
@@ -926,7 +987,7 @@ export default function App() {
         <section className="studio-center">
           <section className="preview-panel">
             <div className="section-header">
-              <div><span>Live preview</span><strong>{project.name}</strong></div>
+              <div><span>Live preview</span></div>
               <div className="preview-controls">
                 <button className="preview-play" onClick={() => setPlaying((value) => !value)}>{playing ? <Pause size={16} /> : <Play size={16} />} {playing ? 'Pause' : 'Play'}</button>
                 <input type="range" min="0" max={project.duration} step="0.01" value={playhead} onChange={(event) => setPlayhead(Number(event.target.value))} />
@@ -945,7 +1006,7 @@ export default function App() {
                 style={{ transform: `perspective(${currentTransform.perspective}px) translate(${currentTransform.x}px, ${currentTransform.y}px) scale(${currentTransform.scale}) rotateX(${currentTransform.rotateX}deg) rotateY(${currentTransform.rotateY}deg) rotateZ(${currentTransform.rotateZ}deg)` }}
               >
                 <div className="viewport-hint">{viewportHint}</div>
-                <InputLagWindow project={project} page={project.page} onAppAction={recordAppAction} />
+                <InputLagWindow project={project} page={project.page} replayCommand={replayCommand} resetToken={previewResetToken} />
               </div>
               {renderStatus && <div className="render-status">{renderStatus}</div>}
               {rendering && <div className="render-blocker">Rendering MOV...</div>}
@@ -956,14 +1017,15 @@ export default function App() {
             playhead={playhead}
             zoom={timelineZoom}
             selectedKeyframeId={selectedKeyframeId}
+            selectedActionId={selectedActionId}
             onZoom={handleTimelineZoom}
             onSeek={setPlayhead}
             onSetFrame={() => setFrameAtPlayhead()}
             onDragKeyframe={dragKeyframe}
-            onDeleteKeyframe={deleteKeyframe}
-            onSelectKeyframe={setSelectedKeyframeId}
-            onDeleteAction={deleteAction}
-            onDeleteSelected={() => selectedKeyframeId && deleteKeyframe(selectedKeyframeId)}
+            onSelectKeyframe={(id) => { setSelectedKeyframeId(id); setSelectedActionId(null) }}
+            onSelectAction={(id) => { setSelectedActionId(id); setSelectedKeyframeId(null) }}
+            onDragAction={dragAction}
+            onDeleteSelected={deleteSelectedTimelineItem}
           />
         </section>
         <Inspector

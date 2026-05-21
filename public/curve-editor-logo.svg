@@ -8,6 +8,6 @@
       <path d="M160 0h44l-38 84h118l-18 40H104L160 0Z"/>
     </g>
     <text x="322" y="86" font-family="Inter, Arial, sans-serif" font-size="68" font-weight="900" letter-spacing="-3">Inputlag</text>
-    <text x="337" y="139" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="850" letter-spacing="15">CURVE EDITOR</text>
+    <text x="337" y="139" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="850" letter-spacing="15"><tspan fill="#b82d35">CURVE</tspan><tspan fill="#ffffff"> EDITOR</tspan></text>
   </g>
 </svg>
