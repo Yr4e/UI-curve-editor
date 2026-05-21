@@ -2,10 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Code2,
   Download,
+  Edit3,
   Minus,
   Pause,
   Play,
   Plus,
+  RotateCcw,
   Rotate3D,
   SlidersHorizontal,
   Square,
@@ -42,7 +44,7 @@ const curvePresets = [
   { id: 'rebound-out', label: 'Rebound Out', curve: [0.2, 1.32, 0.62, 0.86], path: 'M18 112 C64 -22 158 52 242 18' },
 ]
 
-const timelineInset = 0.022
+const timelineInset = 0.045
 const timelineSpan = 1 - timelineInset * 2
 const timelinePct = (time, duration) => `${(timelineInset + (time / duration) * timelineSpan) * 100}%`
 
@@ -157,7 +159,6 @@ function ProjectMeta({ project }) {
   const weight = estimateWeight(project.duration, project.fps)
   return (
     <div className="header-meta">
-      <span>{pageLabel(project.page)}</span>
       <span>{project.fps} FPS</span>
       <span>{project.duration.toFixed(2)}s</span>
       <span>{weight.frames} frames</span>
@@ -167,21 +168,31 @@ function ProjectMeta({ project }) {
   )
 }
 
-function NewProjectModal({ open, onClose, onCreate }) {
-  const [name, setName] = useState('InputLag Project')
-  const [duration, setDuration] = useState('6')
-  const [fps, setFps] = useState('60')
-  const [speed, setSpeed] = useState('1')
-  const [page, setPage] = useState('boost')
+function NewProjectModal({ open, onClose, onCreate, project, mode = 'create' }) {
+  const [name, setName] = useState(project?.name ?? 'InputLag Project')
+  const [duration, setDuration] = useState(String(project?.duration ?? 6))
+  const [fps, setFps] = useState(String(project?.fps ?? 60))
+  const [speed, setSpeed] = useState(String(project?.speed ?? 1))
+  const [page, setPage] = useState(project?.page ?? 'boost')
   const [presetId, setPresetId] = useState('empty')
+
+  useEffect(() => {
+    if (!open) return
+    setName(project?.name ?? 'InputLag Project')
+    setDuration(String(project?.duration ?? 6))
+    setFps(String(project?.fps ?? 60))
+    setSpeed(String(project?.speed ?? 1))
+    setPage(project?.page ?? 'boost')
+    setPresetId('empty')
+  }, [open, project])
 
   if (!open) return null
   return (
     <div className="modal-backdrop">
       <div className="new-modal">
         <div className="modal-head">
-          <span>Create new</span>
-          <strong>Project setup</strong>
+          <span>{mode === 'edit' ? 'Edit project' : 'Create new'}</span>
+          <strong>{mode === 'edit' ? 'Timeline settings' : 'Project setup'}</strong>
         </div>
         <label>Project name<input value={name} onChange={(event) => setName(event.target.value)} /></label>
         <div className="modal-field-grid">
@@ -190,13 +201,15 @@ function NewProjectModal({ open, onClose, onCreate }) {
           <label>FPS<input type="number" min="24" max="120" step="1" value={fps} onChange={(event) => setFps(event.target.value)} /></label>
           <label>Speed<input type="number" min="0.1" max="3" step="0.05" value={speed} onChange={(event) => setSpeed(event.target.value)} /></label>
         </div>
-        <label>
-          Starting preset
-          <select value={presetId} onChange={(event) => setPresetId(event.target.value)}>
-            <option value="empty">No preset - empty straight window</option>
-            {presetTemplates.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
-          </select>
-        </label>
+        {mode !== 'edit' && (
+          <label>
+            Starting preset
+            <select value={presetId} onChange={(event) => setPresetId(event.target.value)}>
+              <option value="empty">No preset - empty straight window</option>
+              {presetTemplates.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
+            </select>
+          </label>
+        )}
         <div className="modal-actions">
           <button onClick={onClose}>Cancel</button>
           <button onClick={() => onCreate({
@@ -206,7 +219,7 @@ function NewProjectModal({ open, onClose, onCreate }) {
             speed: Number(speed) || 1,
             page,
             presetId,
-          })}>Create</button>
+          })}>{mode === 'edit' ? 'Apply' : 'Create'}</button>
         </div>
       </div>
     </div>
@@ -519,20 +532,33 @@ function TransformEditor({ value, onChange, onResetSelected, canReset }) {
     { key: 'rotateZ', min: -40, max: 40, step: 5, labels: ['-40', '-20', '0', '20', '40'] },
     { key: 'perspective', min: 800, max: 2400, step: 100, labels: ['800', '1200', '1600', '2000', '2400'] },
   ]
+  const formatValue = (key, raw) => Number(raw.toFixed(key === 'scale' ? 3 : 1))
+  const snapValue = (raw, step) => Math.round(raw / step) * step
 
   return (
     <div className="transform-editor">
       <div className="mini-title">
         <span>Transform</span>
         <div className="mini-title-actions">
-          <button className="reset-frame-btn" disabled={!canReset} onClick={onResetSelected}>Reset position</button>
+          <button className="reset-frame-btn" disabled={!canReset} onClick={onResetSelected}><RotateCcw size={15} /> Reset position</button>
         </div>
       </div>
       {rows.map(({ key, min, max, step, labels }) => (
         <label key={key}>
           <span>{key}</span>
           <div className="snap-slider">
-            <input type="range" min={min} max={max} step={step} value={value[key]} onChange={(event) => onChange({ [key]: Number(event.target.value) })} />
+            <input
+              type="range"
+              min={min}
+              max={max}
+              step="any"
+              value={value[key]}
+              onChange={(event) => {
+                const raw = Number(event.target.value)
+                const next = event.ctrlKey ? raw : snapValue(raw, step)
+                onChange({ [key]: formatValue(key, clamp(next, min, max)) })
+              }}
+            />
             <div className="snap-ticks" aria-hidden="true">
               {labels.map((label) => <i key={label}><em>{label}</em></i>)}
             </div>
@@ -578,15 +604,15 @@ function Inspector({ project, currentTransform, selectedKeyframeId, onPatchProje
       <div className="panel-title">
         <SlidersHorizontal size={18} />
         <div><span>Inspector</span><strong>Transform</strong></div>
+        <div className="control-hint inline-control-hint">
+          <strong>Controls</strong>
+          <span>LMB drag: move X/Y</span>
+          <span>LMB + wheel: scale</span>
+          <span>RMB hold + wheel: rotate Y</span>
+          <span>Ctrl + wheel: rotate X</span>
+        </div>
       </div>
       <TransformEditor value={currentTransform} onChange={onPatchTransform} onResetSelected={onResetSelected} canReset={Boolean(selectedKeyframeId)} />
-      <div className="control-hint">
-        <strong>Controls</strong>
-        <span>LMB drag: move X/Y</span>
-        <span>LMB + wheel: scale</span>
-        <span>RMB hold + wheel: rotate Y</span>
-        <span>Ctrl + wheel: rotate X</span>
-      </div>
       <GraphEditor project={project} playhead={project.playhead ?? 0} selectedKeyframeId={selectedKeyframeId} onSetCurve={onSetCurve} />
     </aside>
   )
@@ -598,6 +624,7 @@ export default function App() {
   const [playing, setPlaying] = useState(false)
   const [showNew, setShowNew] = useState(false)
   const [showPresets, setShowPresets] = useState(false)
+  const [showEdit, setShowEdit] = useState(false)
   const [showCode, setShowCode] = useState(false)
   const [timelineZoom, setTimelineZoom] = useState(1)
   const [viewportHint, setViewportHint] = useState('Move X/Y')
@@ -902,6 +929,19 @@ export default function App() {
     setShowNew(false)
   }
 
+  const editProject = ({ name, duration, fps, speed, page }) => {
+    setProject((current) => ({
+      ...current,
+      name,
+      duration: Math.max(1, duration || current.duration),
+      fps: fps || current.fps,
+      speed: speed || current.speed,
+      page,
+    }))
+    setPlayhead((value) => Math.min(value, duration || project.duration))
+    setShowEdit(false)
+  }
+
   const handleViewportPointerDown = (event) => {
     if (event.button === 2) {
       event.preventDefault()
@@ -993,6 +1033,7 @@ export default function App() {
         <div className="top-actions">
           <button className="icon-action ready-presets-top" title="Ready Presets" onClick={() => setShowPresets(true)}><Sparkles size={17} /></button>
           <button className="icon-action" title="Code" onClick={() => setShowCode((value) => !value)}><Code2 size={17} /></button>
+          <button className="icon-action edit-action" title="Edit project" onClick={() => setShowEdit(true)}><Edit3 size={16} /></button>
           <button onClick={() => setShowNew(true)}><Plus size={16} /> New</button>
           <button className="render-action" disabled={rendering} onClick={exportMov}><Download size={16} /> Render MOV</button>
         </div>
@@ -1025,7 +1066,6 @@ export default function App() {
                 onContextMenu={(event) => event.preventDefault()}
                 style={{ transform: `perspective(${currentTransform.perspective}px) translate(${currentTransform.x}px, ${currentTransform.y}px) scale(${currentTransform.scale}) rotateX(${currentTransform.rotateX}deg) rotateY(${currentTransform.rotateY}deg) rotateZ(${currentTransform.rotateZ}deg)` }}
               >
-                <div className="preview-grab-bar" />
                 <div className="viewport-hint">{viewportHint}</div>
                 <InputLagWindow project={project} page={project.page} replayCommand={replayCommand} resetToken={previewResetToken} />
               </div>
@@ -1062,6 +1102,7 @@ export default function App() {
       </main>
       {showCode && <CodePanel project={project} playhead={playhead} onClose={() => setShowCode(false)} />}
       <NewProjectModal open={showNew} onClose={() => setShowNew(false)} onCreate={createProject} />
+      <NewProjectModal open={showEdit} onClose={() => setShowEdit(false)} onCreate={editProject} project={project} mode="edit" />
       <PresetBrowserModal open={showPresets} onClose={() => setShowPresets(false)} onAdd={addPresetToTimeline} />
     </div>
   )

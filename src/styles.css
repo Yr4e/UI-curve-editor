@@ -2815,3 +2815,122 @@ select {
 .code-drawer {
   border-color: rgba(255,50,102,0.22);
 }
+
+/* requested editor-frame and transform refinements */
+.studio-app {
+  border: 1px solid rgba(184,45,53,0.44);
+  border-radius: 14px;
+  overflow: hidden;
+  background: rgba(5,5,8,0.96);
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,0.025),
+    0 0 0 1px rgba(0,0,0,0.72);
+}
+
+.topbar {
+  -webkit-app-region: drag;
+}
+
+button,
+input,
+select,
+.preview-transform,
+.timeline-panel,
+.inspector {
+  -webkit-app-region: no-drag;
+}
+
+.split-topbar {
+  gap: 8px;
+  padding-left: 16px;
+}
+
+.app-logo {
+  min-width: 270px;
+}
+
+.app-logo img {
+  width: 286px;
+}
+
+.topbar-slash {
+  margin-left: -10px;
+  margin-right: 2px;
+}
+
+.header-meta {
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+.preview-shell {
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  overflow: hidden;
+}
+
+.preview-transform {
+  border: 0 !important;
+  border-radius: 0 !important;
+  padding-top: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.preview-grab-bar {
+  display: none !important;
+}
+
+.preview-controls input[type="range"] {
+  accent-color: #fff;
+}
+
+.edit-action {
+  color: #fff !important;
+  border-color: rgba(184,45,53,0.62) !important;
+  background: rgba(184,45,53,0.18) !important;
+}
+
+.reset-frame-btn {
+  min-width: 134px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #fff !important;
+  border: 1px solid rgba(184,45,53,0.78) !important;
+  border-radius: 8px;
+  background: rgba(184,45,53,0.94) !important;
+  font-weight: 900;
+}
+
+.transform-editor label {
+  grid-template-columns: 74px minmax(0, 1fr) 50px;
+}
+
+.snap-slider input[type="range"] {
+  accent-color: var(--cyan);
+  background: linear-gradient(90deg, #211022 0%, #ff3266 50%, #211022 100%);
+}
+
+.snap-ticks i {
+  background: rgba(255,255,255,0.18);
+}
+
+.snap-ticks i:nth-child(3) {
+  background: rgba(255,50,102,0.92);
+}
+
+.panel-title {
+  align-items: flex-start;
+}
+
+.inline-control-hint {
+  margin-left: auto;
+  min-width: 172px;
+  padding: 7px 9px;
+  border-color: rgba(255,50,102,0.14);
+  background: rgba(8,7,11,0.68);
+}
