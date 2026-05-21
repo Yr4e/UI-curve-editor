@@ -42,6 +42,10 @@ const curvePresets = [
   { id: 'rebound-out', label: 'Rebound Out', curve: [0.2, 1.32, 0.62, 0.86], path: 'M18 112 C64 -22 158 52 242 18' },
 ]
 
+const timelineInset = 0.022
+const timelineSpan = 1 - timelineInset * 2
+const timelinePct = (time, duration) => `${(timelineInset + (time / duration) * timelineSpan) * 100}%`
+
 const presetTabs = ['Start', 'End', 'Effects']
 const presetGrid = Array.from({ length: 24 }, (_, index) => {
   const template = presetTemplates[index % presetTemplates.length]
@@ -377,11 +381,12 @@ function Timeline({ project, playhead, zoom, selectedKeyframeId, selectedActionI
   const tickStep = 0.5
   const marks = Array.from({ length: Math.floor(duration / tickStep) + 1 }, (_, index) => Number((index * tickStep).toFixed(4))).filter((mark) => mark <= duration)
   const contentWidth = `${Math.max(100, zoom * 100)}%`
-  const playheadPct = `${(playhead / duration) * 100}%`
+  const playheadPct = timelinePct(playhead, duration)
 
   const seekFromEvent = (event) => {
     const rect = trackRef.current.getBoundingClientRect()
-    const pct = clamp((event.clientX - rect.left) / rect.width)
+    const raw = (event.clientX - rect.left) / rect.width
+    const pct = clamp((raw - timelineInset) / timelineSpan)
     onSeek(Number((pct * duration).toFixed(3)))
   }
 
@@ -427,7 +432,7 @@ function Timeline({ project, playhead, zoom, selectedKeyframeId, selectedActionI
               <span
                 key={mark}
                 className={`${Number.isInteger(mark) ? 'major-tick' : 'minor-tick'}${mark === 0 ? ' edge-start' : ''}${Math.abs(mark - duration) < 0.001 ? ' edge-end' : ''}`}
-                style={{ left: `${(mark / duration) * 100}%` }}
+                style={{ left: timelinePct(mark, duration) }}
               >
                 {mark % 1 === 0 ? `${mark.toFixed(0)}s` : `${mark.toFixed(1)}s`}
               </span>
@@ -440,7 +445,7 @@ function Timeline({ project, playhead, zoom, selectedKeyframeId, selectedActionI
                 <button
                   className={selectedKeyframeId === keyframe.id ? 'keyframe-marker active' : 'keyframe-marker'}
                   key={keyframe.id}
-                  style={{ left: `${(keyframe.time / duration) * 100}%` }}
+                  style={{ left: timelinePct(keyframe.time, duration) }}
                   title={`${keyframe.time}s / ${keyframe.curvePreset}`}
                   onClick={(event) => { event.stopPropagation(); onSelectKeyframe(keyframe.id); onSeek(keyframe.time) }}
                   onPointerDown={(event) => {
@@ -449,7 +454,8 @@ function Timeline({ project, playhead, zoom, selectedKeyframeId, selectedActionI
                     event.currentTarget.setPointerCapture(event.pointerId)
                     const rect = trackRef.current.getBoundingClientRect()
                     const move = (moveEvent) => {
-                      const pct = clamp((moveEvent.clientX - rect.left) / rect.width)
+                      const raw = (moveEvent.clientX - rect.left) / rect.width
+                      const pct = clamp((raw - timelineInset) / timelineSpan)
                       onDragKeyframe(keyframe.id, Number((pct * duration).toFixed(3)))
                     }
                     const up = () => {
@@ -470,7 +476,7 @@ function Timeline({ project, playhead, zoom, selectedKeyframeId, selectedActionI
                 <button
                   className={selectedActionId === action.id ? 'action-chip active' : 'action-chip'}
                   key={action.id}
-                  style={{ left: `${(action.time / duration) * 100}%`, width: `${Math.max((action.duration / duration) * 100, 3)}%` }}
+                  style={{ left: timelinePct(action.time, duration), width: `${Math.max((action.duration / duration) * timelineSpan * 100, 3)}%` }}
                   title={`${action.time}s / ${action.label || action.type}`}
                   onClick={(event) => { event.stopPropagation(); onSelectAction(action.id); onSeek(action.time) }}
                   onPointerDown={(event) => {
@@ -479,7 +485,8 @@ function Timeline({ project, playhead, zoom, selectedKeyframeId, selectedActionI
                     event.currentTarget.setPointerCapture(event.pointerId)
                     const rect = trackRef.current.getBoundingClientRect()
                     const move = (moveEvent) => {
-                      const pct = clamp((moveEvent.clientX - rect.left) / rect.width)
+                      const raw = (moveEvent.clientX - rect.left) / rect.width
+                      const pct = clamp((raw - timelineInset) / timelineSpan)
                       onDragAction(action.id, Number((pct * duration).toFixed(3)))
                     }
                     const up = () => {
@@ -503,7 +510,15 @@ function Timeline({ project, playhead, zoom, selectedKeyframeId, selectedActionI
 }
 
 function TransformEditor({ value, onChange, onResetSelected, canReset }) {
-  const rows = [['x', -600, 600], ['y', -360, 360], ['scale', 0.35, 1.8], ['rotateX', -55, 55], ['rotateY', -55, 55], ['rotateZ', -40, 40], ['perspective', 700, 2600]]
+  const rows = [
+    { key: 'x', min: -600, max: 600, step: 100, labels: ['-600', '-300', '0', '300', '600'] },
+    { key: 'y', min: -360, max: 360, step: 60, labels: ['-360', '-180', '0', '180', '360'] },
+    { key: 'scale', min: 0.4, max: 1.6, step: 0.1, labels: ['0.4', '0.8', '1', '1.2', '1.6'] },
+    { key: 'rotateX', min: -60, max: 60, step: 5, labels: ['-60', '-30', '0', '30', '60'] },
+    { key: 'rotateY', min: -60, max: 60, step: 5, labels: ['-60', '-30', '0', '30', '60'] },
+    { key: 'rotateZ', min: -40, max: 40, step: 5, labels: ['-40', '-20', '0', '20', '40'] },
+    { key: 'perspective', min: 800, max: 2400, step: 100, labels: ['800', '1200', '1600', '2000', '2400'] },
+  ]
 
   return (
     <div className="transform-editor">
@@ -513,10 +528,15 @@ function TransformEditor({ value, onChange, onResetSelected, canReset }) {
           <button className="reset-frame-btn" disabled={!canReset} onClick={onResetSelected}>Reset position</button>
         </div>
       </div>
-      {rows.map(([key, min, max]) => (
+      {rows.map(({ key, min, max, step, labels }) => (
         <label key={key}>
           <span>{key}</span>
-          <input type="range" min={min} max={max} step={key === 'scale' ? 0.01 : 1} value={value[key]} onChange={(event) => onChange({ [key]: Number(event.target.value) })} />
+          <div className="snap-slider">
+            <input type="range" min={min} max={max} step={step} value={value[key]} onChange={(event) => onChange({ [key]: Number(event.target.value) })} />
+            <div className="snap-ticks" aria-hidden="true">
+              {labels.map((label) => <i key={label}><em>{label}</em></i>)}
+            </div>
+          </div>
           <b>{value[key]}</b>
         </label>
       ))}
@@ -557,7 +577,7 @@ function Inspector({ project, currentTransform, selectedKeyframeId, onPatchProje
     <aside className="inspector inspector-split">
       <div className="panel-title">
         <SlidersHorizontal size={18} />
-        <div><span>Inspector</span><strong>{project.name}</strong></div>
+        <div><span>Inspector</span><strong>Transform</strong></div>
       </div>
       <TransformEditor value={currentTransform} onChange={onPatchTransform} onResetSelected={onResetSelected} canReset={Boolean(selectedKeyframeId)} />
       <div className="control-hint">
@@ -966,7 +986,7 @@ export default function App() {
     <div className={rendering ? 'studio-app is-rendering' : 'studio-app'}>
       <header className="topbar split-topbar">
         <div className="app-logo">
-          <img src="./curve-editor-logo.png" alt="Inputlag Curve Editor" />
+          <img src="./curve-editor-logo-transparent.png" alt="Inputlag Curve Editor" />
         </div>
         <div className="topbar-slash" />
         <ProjectMeta project={project} />
@@ -994,7 +1014,7 @@ export default function App() {
                 <span>{playhead.toFixed(2)}s</span>
               </div>
             </div>
-            <div className="preview-canvas">
+          <div className="preview-canvas">
               <div
                 className="preview-transform viewport-editable"
                 onPointerDown={handleViewportPointerDown}
@@ -1005,6 +1025,7 @@ export default function App() {
                 onContextMenu={(event) => event.preventDefault()}
                 style={{ transform: `perspective(${currentTransform.perspective}px) translate(${currentTransform.x}px, ${currentTransform.y}px) scale(${currentTransform.scale}) rotateX(${currentTransform.rotateX}deg) rotateY(${currentTransform.rotateY}deg) rotateZ(${currentTransform.rotateZ}deg)` }}
               >
+                <div className="preview-grab-bar" />
                 <div className="viewport-hint">{viewportHint}</div>
                 <InputLagWindow project={project} page={project.page} replayCommand={replayCommand} resetToken={previewResetToken} />
               </div>
