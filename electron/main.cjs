@@ -19,13 +19,15 @@ const run = (command, args, cwd) => new Promise((resolve, reject) => {
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+app.setAppUserModelId('ai.inputlag.render-studio')
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1720,
     height: 980,
     minWidth: 1280,
     minHeight: 760,
-    title: 'Curvy Editor',
+    title: 'InputLag Render Studio',
     backgroundColor: '#050507',
     transparent: false,
     frame: true,
@@ -33,7 +35,7 @@ function createWindow() {
     thickFrame: true,
     autoHideMenuBar: true,
     show: false,
-    icon: path.join(__dirname, '..', 'build', 'icon.png'),
+    icon: path.join(__dirname, '..', 'build', 'icon.ico'),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

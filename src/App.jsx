@@ -1068,21 +1068,16 @@ export default function App() {
     <div className={rendering ? 'studio-app is-rendering' : 'studio-app'}>
       <header className="topbar split-topbar">
         <div className="app-logo">
-          <img src="./curve-editor-logo-transparent.png" alt="Inputlag Curve Editor" />
+          <img src="./curve-editor-logo-purple.png" alt="InputLag Render Studio" />
         </div>
         <div className="topbar-slash" />
-        <div className="topbar-center-mark"><img src="./app-icon.png" alt="" /></div>
+        <div className="topbar-center-mark"><img src="./center-il-purple.png" alt="" /></div>
         <ProjectMeta project={project} />
         <div className="top-actions">
           <button className="icon-action ready-presets-top" title="Ready Presets" onClick={() => setShowPresets(true)}><Sparkles size={17} /></button>
           <button className="icon-action" title="Code" onClick={() => setShowCode((value) => !value)}><Code2 size={17} /></button>
           <button onClick={() => setShowNew(true)}><Plus size={16} /> New</button>
           <button className="render-action" disabled={rendering} onClick={exportMov}><Download size={16} /> Render MOV</button>
-        </div>
-        <div className="window-controls">
-          <button title="Minimize" onClick={() => window.curvy?.minimize?.()}><Minus size={13} /></button>
-          <button title="Maximize" onClick={() => window.curvy?.maximize?.()}><Square size={12} /></button>
-          <button title="Close" onClick={() => window.curvy?.close?.()}><X size={14} /></button>
         </div>
       </header>
 

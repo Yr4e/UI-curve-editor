@@ -1,6 +1,6 @@
 {
   "name": "inputlag-render-studio",
-  "productName": "Curvy Editor",
+  "productName": "InputLag Render Studio",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -26,8 +26,8 @@
     "electron-builder": "^26.8.1"
   },
   "build": {
-    "appId": "ai.inputlag.curvy-editor",
-    "productName": "Curvy Editor",
+    "appId": "ai.inputlag.render-studio",
+    "productName": "InputLag Render Studio",
     "directories": {
       "output": "desktop-build"
     },
@@ -38,7 +38,7 @@
       "package.json"
     ],
     "win": {
-      "icon": "build/icon.png",
+      "icon": "build/icon.ico",
       "signAndEditExecutable": false,
       "target": [
         "portable"
