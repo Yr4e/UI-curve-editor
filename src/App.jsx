@@ -523,6 +523,7 @@ function Timeline({ project, playhead, zoom, selectedKeyframeId, selectedActionI
 }
 
 function TransformEditor({ value, onChange, onResetSelected, canReset }) {
+  const [ctrlDown, setCtrlDown] = useState(false)
   const rows = [
     { key: 'x', min: -600, max: 600, step: 100, labels: ['-600', '-300', '0', '300', '600'] },
     { key: 'y', min: -360, max: 360, step: 60, labels: ['-360', '-180', '0', '180', '360'] },
@@ -534,6 +535,24 @@ function TransformEditor({ value, onChange, onResetSelected, canReset }) {
   ]
   const formatValue = (key, raw) => Number(raw.toFixed(key === 'scale' ? 3 : 1))
   const snapValue = (raw, step) => Math.round(raw / step) * step
+
+  useEffect(() => {
+    const down = (event) => {
+      if (event.key === 'Control') setCtrlDown(true)
+    }
+    const up = (event) => {
+      if (event.key === 'Control') setCtrlDown(false)
+    }
+    const blur = () => setCtrlDown(false)
+    window.addEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    window.addEventListener('blur', blur)
+    return () => {
+      window.removeEventListener('keydown', down)
+      window.removeEventListener('keyup', up)
+      window.removeEventListener('blur', blur)
+    }
+  }, [])
 
   return (
     <div className="transform-editor">
@@ -555,7 +574,7 @@ function TransformEditor({ value, onChange, onResetSelected, canReset }) {
               value={value[key]}
               onChange={(event) => {
                 const raw = Number(event.target.value)
-                const next = event.ctrlKey ? raw : snapValue(raw, step)
+                const next = ctrlDown ? raw : snapValue(raw, step)
                 onChange({ [key]: formatValue(key, clamp(next, min, max)) })
               }}
             />
@@ -827,6 +846,19 @@ export default function App() {
     }
     if (selectedActionId) deleteAction(selectedActionId)
   }
+
+  useEffect(() => {
+    const handleDelete = (event) => {
+      if (event.key !== 'Delete' && event.key !== 'Backspace') return
+      const tag = document.activeElement?.tagName?.toLowerCase()
+      if (tag === 'input' || tag === 'select' || tag === 'textarea') return
+      if (!selectedKeyframeId && !selectedActionId) return
+      event.preventDefault()
+      deleteSelectedTimelineItem()
+    }
+    window.addEventListener('keydown', handleDelete)
+    return () => window.removeEventListener('keydown', handleDelete)
+  }, [selectedKeyframeId, selectedActionId])
 
   const setCurveForSegment = (curvePreset) => {
     const segment = getSegmentForTime(project, playhead, selectedKeyframeId)

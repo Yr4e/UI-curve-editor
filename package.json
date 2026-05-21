@@ -34,9 +34,11 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "build/**/*",
       "package.json"
     ],
     "win": {
+      "icon": "build/icon.png",
       "signAndEditExecutable": false,
       "target": [
         "portable"

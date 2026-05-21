@@ -2934,3 +2934,94 @@ select,
   border-color: rgba(255,50,102,0.14);
   background: rgba(8,7,11,0.68);
 }
+
+/* clean window chrome and neutral controls */
+.studio-app {
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  background: rgba(5,5,8,0.98);
+}
+
+.topbar {
+  -webkit-app-region: drag;
+}
+
+.keyframe-marker,
+.keyframe-marker.active,
+.action-chip,
+.action-chip.active {
+  cursor: pointer !important;
+}
+
+.snap-slider input[type="range"] {
+  height: 18px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent !important;
+  accent-color: #fff;
+}
+
+.snap-slider input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #211022 0%, rgba(255,255,255,0.9) 50%, #211022 100%);
+}
+
+.snap-slider input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border: 1px solid rgba(255,255,255,0.9);
+  border-radius: 999px;
+  background: #f7f7fb;
+  box-shadow: 0 0 0 3px rgba(33,16,34,0.78);
+}
+
+.snap-slider input[type="range"]::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #211022 0%, rgba(255,255,255,0.9) 50%, #211022 100%);
+}
+
+.snap-slider input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 1px solid rgba(255,255,255,0.9);
+  border-radius: 999px;
+  background: #f7f7fb;
+  box-shadow: 0 0 0 3px rgba(33,16,34,0.78);
+}
+
+.snap-ticks i,
+.snap-ticks i:nth-child(3) {
+  background: rgba(255,255,255,0.18);
+}
+
+.snap-ticks em,
+.snap-ticks i:nth-child(3) em {
+  color: rgba(255,255,255,0.34);
+}
+
+.inline-control-hint {
+  min-width: 0;
+  padding: 0;
+  border: 0 !important;
+  background: transparent !important;
+  opacity: 0.5;
+}
+
+.inline-control-hint strong {
+  font-size: 11px;
+}
+
+.inline-control-hint span {
+  font-size: 10px;
+}
+
+.edit-action {
+  border-color: rgba(255,50,102,0.62) !important;
+  background: rgba(255,50,102,0.18) !important;
+}
