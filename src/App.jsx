@@ -16,8 +16,10 @@ import {
   X,
 } from 'lucide-react'
 import { pages, presetTemplates } from './data/presets.js'
+import { savedProjectCode } from './data/savedProject.js'
 
 const inputLagPreviewUrl = './inputlag-preview/index.html'
+const projectStorageKey = 'inputlag-render-studio.project.v1'
 
 const defaultTransform = {
   x: 0,
@@ -44,10 +46,9 @@ const curvePresets = [
   { id: 'rebound-out', label: 'Rebound Out', curve: [0.2, 1.32, 0.62, 0.86], path: 'M18 112 C64 -22 158 52 242 18' },
 ]
 
-const timelineInset = 0.045
+const timelineInset = 0
 const timelineSpan = 1 - timelineInset * 2
 const timelinePct = (time, duration) => `${(timelineInset + (time / duration) * timelineSpan) * 100}%`
-
 const presetTabs = ['Start', 'End', 'Effects']
 const presetGrid = Array.from({ length: 24 }, (_, index) => {
   const template = presetTemplates[index % presetTemplates.length]
@@ -64,6 +65,62 @@ const pageLabel = (id) => pages.find((page) => page.id === id)?.label ?? id
 const curveById = (id) => curvePresets.find((curve) => curve.id === id) ?? curvePresets[1]
 const sortedKeyframes = (project) => [...project.windowTrack.keyframes].sort((a, b) => a.time - b.time)
 const sortedActions = (project) => [...project.actionTrack.actions].sort((a, b) => a.time - b.time)
+
+const hydrateProjectCode = (code) => {
+  if (!code?.project || !code?.tracks?.window) return null
+  return {
+    ...makeProject({
+      name: code.project.name,
+      duration: code.project.duration,
+      fps: code.project.fps,
+      speed: code.project.speed,
+      page: code.project.page,
+    }),
+    name: code.project.name || 'InputLag Project',
+    duration: Number(code.project.duration) || 6,
+    fps: Number(code.project.fps) || 60,
+    speed: Number(code.project.speed) || 1,
+    page: code.project.page || 'control-center',
+    baseTransform: { ...defaultTransform, ...(code.tracks.window.baseTransform || {}) },
+    windowTrack: {
+      name: 'Window',
+      keyframes: (code.tracks.window.keyframes || []).map((keyframe) => ({
+        id: keyframe.id || crypto.randomUUID(),
+        time: Number(keyframe.time) || 0,
+        transform: { ...defaultTransform, ...(keyframe.transform || {}) },
+        curvePreset: keyframe.curve || keyframe.curvePreset || 'linear',
+        preset: keyframe.preset ?? null,
+      })),
+    },
+    actionTrack: {
+      name: 'Action',
+      actions: (code.tracks.action?.actions || []).map((action) => ({
+        id: action.id || crypto.randomUUID(),
+        time: Number(action.time) || 0,
+        duration: Number(action.duration) || 0.45,
+        type: action.type,
+        label: action.label,
+        selector: action.selector ?? null,
+        page: action.page ?? code.project.page ?? null,
+        route: action.route ?? null,
+        scrollTop: action.scrollTop ?? null,
+        scrollLeft: action.scrollLeft ?? null,
+        preset: action.preset ?? null,
+        category: action.category ?? 'recorded',
+      })),
+    },
+  }
+}
+
+const loadInitialProject = () => {
+  try {
+    const stored = window.localStorage?.getItem(projectStorageKey)
+    if (stored) return JSON.parse(stored)
+  } catch {
+    // Fall back to bundled saved project.
+  }
+  return hydrateProjectCode(savedProjectCode) || makeProject()
+}
 
 const estimateWeight = (duration, fps) => {
   const frames = Math.round(duration * fps)
@@ -226,8 +283,65 @@ function NewProjectModal({ open, onClose, onCreate, project, mode = 'create' }) 
   )
 }
 
-function InputLagWindow({ project, page, replayCommand, resetToken }) {
+const syncFrameAnimations = (targetWindow, time, active, actionTime = null) => {
+  if (!targetWindow?.document) return
+  const timeSeconds = Math.max(0, Number(time) || 0)
+  const timeMs = timeSeconds * 1000
+  const actionSeconds = Number.isFinite(actionTime) ? Math.max(0, Number(actionTime)) : null
+  const actionElapsedMs = actionSeconds === null ? null : Math.max(0, (timeSeconds - actionSeconds) * 1000)
+
+  const syncDocument = (win) => {
+    const doc = win?.document
+    if (!doc) return
+    win.__inputlagStudioRenderTime = active ? timeSeconds : null
+    win.__inputlagStudioRendering = Boolean(active)
+    win.__inputlagStudioLastActionTime = active ? actionSeconds : null
+    doc.documentElement.dataset.studioRenderTime = active ? String(timeSeconds) : ''
+    doc.dispatchEvent(new win.CustomEvent('inputlag-studio-render-time', {
+      detail: { time: active ? timeSeconds : null, actionTime: active ? actionSeconds : null, active: Boolean(active) },
+    }))
+
+    doc.getAnimations?.({ subtree: true }).forEach((animation) => {
+      try {
+        if (active) {
+          const timing = animation.effect?.getTiming?.() || {}
+          const duration = Number(timing.duration)
+          const isTransition = typeof win.CSSTransition !== 'undefined' && animation instanceof win.CSSTransition
+          const isFiniteTransition = isTransition
+            && actionElapsedMs !== null
+            && Number.isFinite(duration)
+            && duration > 0
+            && timing.iterations !== Infinity
+          const isInfiniteAnimation = timing.iterations === Infinity
+          animation.pause()
+          if (isFiniteTransition) {
+            animation.currentTime = Math.min(actionElapsedMs, duration)
+          } else if (isInfiniteAnimation) {
+            animation.currentTime = timeMs
+          }
+        } else if (animation.playState === 'paused') {
+          animation.play()
+        }
+      } catch {
+        // Cross-browser animation objects can reject play/currentTime during teardown.
+      }
+    })
+
+    doc.querySelectorAll('iframe').forEach((frame) => {
+      try {
+        syncDocument(frame.contentWindow)
+      } catch {
+        // Ignore cross-origin frames.
+      }
+    })
+  }
+
+  syncDocument(targetWindow)
+}
+
+function InputLagWindow({ project, page, replayCommand, resetToken, rendering, renderSyncTime }) {
   const frameRef = useRef(null)
+  const lastActionTimeRef = useRef(null)
   const routeMap = {
     'control-center': '/center',
     boost: '/boost',
@@ -248,19 +362,64 @@ function InputLagWindow({ project, page, replayCommand, resetToken }) {
   const pageUrl = source.startsWith('blob:')
     ? source
     : `${cleanSource}?renderCapture=boost-ai&studioPreview=1&page=${renderPageMap[page] ?? 'boost'}&studioReset=${resetToken}#${routeMap[page] ?? '/center'}`
+  const normalizeReplayAction = (action) => {
+    if (!action) return null
+    if (action.selector || action.type === 'navigate' || action.type === 'scroll') return action
+
+    const targetPage = action.page || page
+    const route = action.route || routeMap[targetPage] || routeMap[page] || '/center'
+    const fallbackSelectors = {
+      'toggle.apply': '.tweak-row button, .toggle, .switch, [role="switch"], button',
+      'score.pulse': '.score-card, .score-ring, [data-score], button',
+      'text.type': 'input, textarea, [contenteditable="true"]',
+      'text.fadeBlurIn': 'input, textarea, [contenteditable="true"]',
+      'text.eraseRange': 'input, textarea, [contenteditable="true"]',
+      'text.hold': 'input, textarea, [contenteditable="true"]',
+    }
+
+    if (action.type === 'page.lock') {
+      return { ...action, type: 'navigate', route }
+    }
+    if (action.type === 'scroll.to') {
+      return { ...action, type: 'scroll', selector: 'window', route, scrollTop: action.scrollTop ?? 520, scrollLeft: action.scrollLeft ?? 0 }
+    }
+    if (fallbackSelectors[action.type]) {
+      return { ...action, type: 'click', route, selector: fallbackSelectors[action.type] }
+    }
+    return action
+  }
 
   useEffect(() => {
     if (!replayCommand?.action || !frameRef.current?.contentWindow) return
+    const action = normalizeReplayAction(replayCommand.action)
+    if (!action) return
+    const actionTime = Number.isFinite(action.time) ? action.time : renderSyncTime
+    lastActionTimeRef.current = Number.isFinite(actionTime) ? actionTime : lastActionTimeRef.current
     frameRef.current.contentWindow.postMessage({
       source: 'curvy-editor',
       command: 'replay-action',
-      action: replayCommand.action,
+      action,
+      renderTime: renderSyncTime,
+      actionTime: lastActionTimeRef.current,
     }, '*')
   }, [replayCommand])
 
+  useEffect(() => {
+    const frameWindow = frameRef.current?.contentWindow
+    if (!frameWindow) return undefined
+    syncFrameAnimations(frameWindow, renderSyncTime, rendering && Number.isFinite(renderSyncTime), lastActionTimeRef.current)
+    return undefined
+  }, [rendering, renderSyncTime, pageUrl])
+
   return (
     <div className="preview-shell">
-      <iframe ref={frameRef} className="inputlag-frame" title="InputLag preview" src={pageUrl} />
+      <iframe
+        ref={frameRef}
+        className="inputlag-frame"
+        title="InputLag preview"
+        src={pageUrl}
+        onLoad={() => syncFrameAnimations(frameRef.current?.contentWindow, renderSyncTime, rendering && Number.isFinite(renderSyncTime), lastActionTimeRef.current)}
+      />
     </div>
   )
 }
@@ -400,7 +559,7 @@ function Timeline({ project, playhead, zoom, selectedKeyframeId, selectedActionI
     const rect = trackRef.current.getBoundingClientRect()
     const raw = (event.clientX - rect.left) / rect.width
     const pct = clamp((raw - timelineInset) / timelineSpan)
-    onSeek(Number((pct * duration).toFixed(3)))
+    onSeek(Number(clamp(pct * duration, 0, duration).toFixed(3)))
   }
 
   const beginScrub = (event) => {
@@ -470,7 +629,7 @@ function Timeline({ project, playhead, zoom, selectedKeyframeId, selectedActionI
                     const move = (moveEvent) => {
                       const raw = (moveEvent.clientX - rect.left) / rect.width
                       const pct = clamp((raw - timelineInset) / timelineSpan)
-                      onDragKeyframe(keyframe.id, Number((pct * duration).toFixed(3)))
+                      onDragKeyframe(keyframe.id, Number(clamp(pct * duration, 0, duration).toFixed(3)))
                     }
                     const up = () => {
                       window.removeEventListener('pointermove', move)
@@ -502,7 +661,7 @@ function Timeline({ project, playhead, zoom, selectedKeyframeId, selectedActionI
                     const move = (moveEvent) => {
                       const raw = (moveEvent.clientX - rect.left) / rect.width
                       const pct = clamp((raw - timelineInset) / timelineSpan)
-                      onDragAction(action.id, Number((pct * duration).toFixed(3)))
+                      onDragAction(action.id, Number(clamp(pct * duration, 0, duration).toFixed(3)))
                     }
                     const up = () => {
                       window.removeEventListener('pointermove', move)
@@ -648,9 +807,10 @@ function Inspector({ project, currentTransform, selectedKeyframeId, onPatchProje
 }
 
 export default function App() {
-  const [project, setProject] = useState(makeProject())
+  const [project, setProject] = useState(loadInitialProject)
   const [playhead, setPlayhead] = useState(0)
   const [playing, setPlaying] = useState(false)
+  const [recordingApp, setRecordingApp] = useState(false)
   const [showNew, setShowNew] = useState(false)
   const [showPresets, setShowPresets] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
@@ -659,15 +819,20 @@ export default function App() {
   const [viewportHint, setViewportHint] = useState('Move X/Y')
   const [renderStatus, setRenderStatus] = useState('')
   const [rendering, setRendering] = useState(false)
+  const [renderSyncTime, setRenderSyncTime] = useState(null)
   const [rotateMode, setRotateMode] = useState(false)
   const [selectedKeyframeId, setSelectedKeyframeId] = useState(null)
   const [selectedActionId, setSelectedActionId] = useState(null)
   const [previewResetToken, setPreviewResetToken] = useState(0)
   const [replayCommand, setReplayCommand] = useState(null)
   const rafRef = useRef(null)
+  const recordRafRef = useRef(null)
   const startedAtRef = useRef(0)
+  const recordStartedAtRef = useRef(0)
   const basePlayheadRef = useRef(0)
   const playbackLastTimeRef = useRef(0)
+  const renderLastTimeRef = useRef(0)
+  const scrollRecordRef = useRef(null)
   const dragRef = useRef(null)
   const rotateTimerRef = useRef(null)
   const wheelFrameRef = useRef(null)
@@ -675,6 +840,14 @@ export default function App() {
 
   const projectWithPlayhead = useMemo(() => ({ ...project, playhead }), [project, playhead])
   const currentTransform = useMemo(() => getTransformAtTime(project, playhead), [project, playhead])
+
+  useEffect(() => {
+    try {
+      window.localStorage?.setItem(projectStorageKey, JSON.stringify(project))
+    } catch {
+      // The bundled saved project still keeps a recovery copy.
+    }
+  }, [project])
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -691,20 +864,22 @@ export default function App() {
   useEffect(() => {
     if (!window.curvy?.onRenderSetTime) return undefined
     return window.curvy.onRenderSetTime((time) => {
+      const nextTime = Number((clamp(time / project.duration) * project.duration).toFixed(3))
       setPlaying(false)
-      setPlayhead(Number((clamp(time / project.duration) * project.duration).toFixed(3)))
+      setRenderSyncTime(nextTime)
+      setPlayhead(nextTime)
     })
   }, [project.duration])
 
   useEffect(() => {
     const handler = (event) => {
       if (event.data?.source !== 'inputlag-studio-preview' || !event.data.action) return
-      if (playing) return
+      if (playing && !recordingApp) return
       recordAppAction({ ...event.data.action, page: project.page })
     }
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
-  }, [playing, playhead, project.duration, project.page])
+  }, [playing, recordingApp, playhead, project.duration, project.page])
 
   useEffect(() => {
     if (!playing) return undefined
@@ -720,6 +895,24 @@ export default function App() {
   }, [playing, project.duration, project.speed])
 
   useEffect(() => {
+    if (!recordingApp) return undefined
+    recordStartedAtRef.current = performance.now()
+    setPlayhead(0)
+    const tick = (now) => {
+      const elapsed = Math.min(project.duration, (now - recordStartedAtRef.current) / 1000)
+      setPlayhead(Number(elapsed.toFixed(3)))
+      if (elapsed >= project.duration) {
+        setRecordingApp(false)
+        setRenderStatus('App recording captured')
+        return
+      }
+      recordRafRef.current = requestAnimationFrame(tick)
+    }
+    recordRafRef.current = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(recordRafRef.current)
+  }, [recordingApp, project.duration])
+
+  useEffect(() => {
     if (!playing) {
       playbackLastTimeRef.current = playhead
       return
@@ -729,11 +922,12 @@ export default function App() {
   }, [playing])
 
   useEffect(() => {
-    if (!playing) return
-    const previous = playbackLastTimeRef.current
+    if (!playing && !rendering) return
+    const lastTimeRef = rendering ? renderLastTimeRef : playbackLastTimeRef
+    const previous = lastTimeRef.current
     if (playhead < previous) {
       setPreviewResetToken((value) => value + 1)
-      playbackLastTimeRef.current = Math.max(0, playhead - 0.001)
+      lastTimeRef.current = Math.max(0, playhead - 0.001)
       return
     }
     const dueActions = sortedActions(project).filter((action) => action.time > previous && action.time <= playhead + 0.012)
@@ -742,8 +936,8 @@ export default function App() {
         setReplayCommand({ id: crypto.randomUUID(), action })
       }, index * 40)
     })
-    playbackLastTimeRef.current = playhead
-  }, [playing, playhead, project])
+    lastTimeRef.current = playhead
+  }, [playing, rendering, playhead, project])
 
   const setFrameAtPlayhead = (transform = currentTransform, extra = {}) => {
     let nextId = selectedKeyframeId
@@ -922,17 +1116,48 @@ export default function App() {
   }
 
   const recordAppAction = (action) => {
-    const time = Number(Math.max(0, Math.min(project.duration, playhead)).toFixed(3))
+    const sourceTime = recordingApp
+      ? (performance.now() - recordStartedAtRef.current) / 1000
+      : playhead
+    const time = Number(Math.max(0, Math.min(project.duration, sourceTime)).toFixed(3))
     let nextId = null
     setProject((current) => {
-      const last = current.actionTrack.actions[current.actionTrack.actions.length - 1]
+      const recordedActions = current.actionTrack.actions
+      const last = recordedActions[recordedActions.length - 1]
+      if (action.type === 'scroll') {
+        const selector = action.selector || 'window'
+        const route = action.route || ''
+        const scrollTop = Math.round(action.scrollTop ?? 0)
+        const scrollLeft = Math.round(action.scrollLeft ?? 0)
+        nextId = crypto.randomUUID()
+        scrollRecordRef.current = { id: nextId, selector, route, updatedAt: time, scrollTop, scrollLeft }
+        return {
+          ...current,
+          actionTrack: {
+            ...current.actionTrack,
+            actions: [...current.actionTrack.actions, {
+              id: nextId,
+              time,
+              duration: 0.9,
+              type: action.type,
+              label: action.label,
+              selector,
+              page: action.page,
+              route,
+              scrollTop,
+              scrollLeft,
+              category: 'recorded',
+            }].sort((a, b) => a.time - b.time),
+          },
+        }
+      }
+      scrollRecordRef.current = null
       if (
         last &&
-        Math.abs(last.time - time) < (action.type === 'scroll' ? 0.35 : 0.02) &&
+        Math.abs(last.time - time) < 0.02 &&
         last.type === action.type &&
         last.label === action.label &&
-        last.selector === action.selector &&
-        (action.type !== 'scroll' || Math.abs((last.scrollTop ?? 0) - (action.scrollTop ?? 0)) < 18)
+        last.selector === action.selector
       ) {
         nextId = last.id
         return current
@@ -945,7 +1170,7 @@ export default function App() {
           actions: [...current.actionTrack.actions, {
             id: nextId,
             time,
-            duration: 0.35,
+            duration: action.type === 'scroll' ? 0.9 : 0.45,
             type: action.type,
             label: action.label,
             selector: action.selector,
@@ -966,6 +1191,7 @@ export default function App() {
     setProject(makeProject({ name, duration, fps, speed, page, presetId }))
     setPlayhead(0)
     setPlaying(false)
+    setRecordingApp(false)
     setSelectedKeyframeId(null)
     setSelectedActionId(null)
     setShowNew(false)
@@ -1036,18 +1262,52 @@ export default function App() {
     setTimelineZoom(nextZoom)
   }
 
+  const startAppRecording = () => {
+    setPlaying(false)
+    setRecordingApp(true)
+    setRenderStatus('Recording app actions...')
+    setPlayhead(0)
+    playbackLastTimeRef.current = -0.001
+    renderLastTimeRef.current = -0.001
+    setPreviewResetToken((value) => value + 1)
+    setSelectedActionId(null)
+    setSelectedKeyframeId(null)
+    setProject((current) => ({
+      ...current,
+      actionTrack: {
+        ...current.actionTrack,
+        actions: current.actionTrack.actions.filter((action) => action.category !== 'recorded'),
+      },
+    }))
+  }
+
   const exportMov = async () => {
     if (!window.curvy?.renderMov) {
       setRenderStatus('Render works in desktop build')
       return
     }
+    setRenderStatus('Preparing export...')
+    setPlaying(false)
+    setRecordingApp(false)
+    setPlayhead(0)
+    setRenderSyncTime(0)
+    renderLastTimeRef.current = -0.001
+    setPreviewResetToken((value) => value + 1)
     setRendering(true)
-    setRenderStatus('Rendering...')
+    document.documentElement.classList.add('render-alpha-root')
     document.body.classList.add('render-alpha')
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    await new Promise((resolve) => window.setTimeout(resolve, 2200))
     const windowRect = document.querySelector('.preview-transform')?.getBoundingClientRect()
     const rect = windowRect
-      ? { x: Math.round(windowRect.x), y: Math.round(windowRect.y), width: Math.round(windowRect.width), height: Math.round(windowRect.height) }
+      ? {
+          x: Math.floor(windowRect.x),
+          y: Math.floor(windowRect.y),
+          width: Math.ceil(windowRect.width),
+          height: Math.ceil(windowRect.height),
+        }
       : null
+    setRenderStatus('Rendering MOV...')
     try {
       const result = await window.curvy.renderMov({
         project: {
@@ -1056,11 +1316,15 @@ export default function App() {
           fps: project.fps,
         },
         rect,
+        quality: 'ultra',
+        renderScale: 2,
       })
       setRenderStatus(result?.ok ? `Rendered: ${result.output}` : `Render failed: ${result?.error || 'unknown error'}`)
     } finally {
       document.body.classList.remove('render-alpha')
+      document.documentElement.classList.remove('render-alpha-root')
       setRendering(false)
+      setRenderSyncTime(null)
     }
   }
 
@@ -1077,6 +1341,9 @@ export default function App() {
           <button className="icon-action ready-presets-top" title="Ready Presets" onClick={() => setShowPresets(true)}><Sparkles size={17} /></button>
           <button className="icon-action" title="Code" onClick={() => setShowCode((value) => !value)}><Code2 size={17} /></button>
           <button onClick={() => setShowNew(true)}><Plus size={16} /> New</button>
+          <button className={recordingApp ? 'render-action recording' : 'render-action'} disabled={rendering || recordingApp} onClick={startAppRecording}>
+            {recordingApp ? <Square size={16} /> : <Play size={16} />} {recordingApp ? 'Recording...' : 'Record App'}
+          </button>
           <button className="render-action" disabled={rendering} onClick={exportMov}><Download size={16} /> Render MOV</button>
         </div>
       </header>
@@ -1088,7 +1355,7 @@ export default function App() {
               <div><span>Live preview</span></div>
               <div className="preview-controls">
                 <button className="preview-edit" title="Edit project" onClick={() => setShowEdit(true)}><Edit3 size={16} /></button>
-                <button className="preview-play" onClick={() => setPlaying((value) => !value)}>{playing ? <Pause size={16} /> : <Play size={16} />} {playing ? 'Pause' : 'Play'}</button>
+                <button className="preview-play" disabled={recordingApp} onClick={() => setPlaying((value) => !value)}>{playing ? <Pause size={16} /> : <Play size={16} />} {playing ? 'Pause' : 'Play'}</button>
                 <input type="range" min="0" max={project.duration} step="0.01" value={playhead} onChange={(event) => setPlayhead(Number(event.target.value))} />
                 <span>{playhead.toFixed(2)}s</span>
               </div>
@@ -1105,7 +1372,14 @@ export default function App() {
                 style={{ transform: `perspective(${currentTransform.perspective}px) translate(${currentTransform.x}px, ${currentTransform.y}px) scale(${currentTransform.scale}) rotateX(${currentTransform.rotateX}deg) rotateY(${currentTransform.rotateY}deg) rotateZ(${currentTransform.rotateZ}deg)` }}
               >
                 <div className="viewport-hint">{viewportHint}</div>
-                <InputLagWindow project={project} page={project.page} replayCommand={replayCommand} resetToken={previewResetToken} />
+                <InputLagWindow
+                  project={project}
+                  page={project.page}
+                  replayCommand={replayCommand}
+                  resetToken={previewResetToken}
+                  rendering={rendering}
+                  renderSyncTime={renderSyncTime}
+                />
               </div>
               {renderStatus && <div className="render-status">{renderStatus}</div>}
               {rendering && <div className="render-blocker">Rendering MOV...</div>}

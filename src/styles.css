@@ -45,6 +45,8 @@ body {
   background-size: 46px 46px, 46px 46px, auto, auto, auto;
 }
 
+html.render-alpha-root,
+html:has(body.render-alpha),
 body.render-alpha {
   background: transparent !important;
 }
@@ -53,19 +55,28 @@ body.render-alpha .studio-app,
 body.render-alpha .workspace,
 body.render-alpha .studio-center,
 body.render-alpha .preview-panel,
-body.render-alpha .preview-canvas {
+body.render-alpha .preview-canvas,
+body.render-alpha .preview-transform,
+body.render-alpha .preview-shell {
   background: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;
+  filter: none !important;
 }
 
 body.render-alpha .topbar,
 body.render-alpha .timeline-panel,
 body.render-alpha .inspector,
 body.render-alpha .section-header,
-body.render-alpha .render-status {
+body.render-alpha .render-status,
+body.render-alpha .render-blocker,
+body.render-alpha .viewport-hint {
   opacity: 0 !important;
   pointer-events: none !important;
+}
+
+body.render-alpha .inputlag-frame {
+  background: transparent !important;
 }
 
 button,
@@ -301,7 +312,7 @@ button {
   background-size: 34px 34px, 34px 34px, auto, auto;
 }
 
-body.render-alpha .preview-canvas {
+body.render-alpha:not(.render-export) .preview-canvas {
   background: transparent !important;
 }
 
@@ -1441,13 +1452,13 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .inputlag-frame {
-  width: 1600px;
-  height: 900px;
+  width: 1280px;
+  height: 800px;
   border: 0;
   display: block;
   border-radius: 10px;
   background: #05070b;
-  transform: scale(0.65);
+  transform: scale(0.8125);
   transform-origin: 0 0;
 }
 
@@ -2181,6 +2192,12 @@ body {
   font-weight: 900;
 }
 
+.render-action.recording {
+  color: #fff !important;
+  background: rgba(255, 50, 102, 0.84) !important;
+  border-color: rgba(255, 50, 102, 0.92) !important;
+}
+
 .workspace.no-left {
   grid-template-columns: minmax(900px, 1fr) 360px;
 }
@@ -2213,8 +2230,8 @@ body {
 }
 
 .preview-transform {
-  width: min(1180px, calc(100% - 84px));
-  aspect-ratio: 16 / 9;
+  width: 1180px;
+  height: 737.5px;
 }
 
 .preview-shell {
@@ -2224,10 +2241,10 @@ body {
 }
 
 .inputlag-frame {
-  width: 100%;
-  height: 100%;
-  transform: none;
-  transform-origin: 50% 50%;
+  width: 1280px;
+  height: 800px;
+  transform: scale(0.921875);
+  transform-origin: 0 0;
   border: 0;
 }
 
@@ -2579,11 +2596,15 @@ body {
   }
 
   .preview-transform {
-    width: min(1060px, calc(100% - 70px));
+    width: 1180px;
+    height: 737.5px;
   }
 
   .inputlag-frame {
-    transform: none;
+    width: 1280px;
+    height: 800px;
+    transform: scale(0.921875);
+    transform-origin: 0 0;
   }
 }
 

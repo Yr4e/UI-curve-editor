@@ -19,7 +19,44 @@ const run = (command, args, cwd) => new Promise((resolve, reject) => {
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+const captureFramePng = async (webContents, rect, scale) => {
+  const renderScale = Math.max(1, Math.min(Number(scale) || 1, 3))
+  if (renderScale === 1 || !rect) {
+    return webContents.capturePage(rect).then((image) => image.toPNG())
+  }
+
+  let attachedHere = false
+  try {
+    if (!webContents.debugger.isAttached()) {
+      webContents.debugger.attach('1.3')
+      attachedHere = true
+    }
+    const result = await webContents.debugger.sendCommand('Page.captureScreenshot', {
+      format: 'png',
+      fromSurface: true,
+      captureBeyondViewport: false,
+      clip: {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+        scale: renderScale,
+      },
+    })
+    return Buffer.from(result.data, 'base64')
+  } finally {
+    if (attachedHere && webContents.debugger.isAttached()) {
+      webContents.debugger.detach()
+    }
+  }
+}
+
 app.setAppUserModelId('ai.inputlag.render-studio')
+
+const singleInstanceLock = app.requestSingleInstanceLock()
+if (!singleInstanceLock) {
+  app.quit()
+}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -66,6 +103,13 @@ function createWindow() {
 
 app.whenReady().then(createWindow)
 
+app.on('second-instance', () => {
+  const win = BrowserWindow.getAllWindows()[0]
+  if (!win) return
+  if (win.isMinimized()) win.restore()
+  win.focus()
+})
+
 ipcMain.on('window:minimize', (event) => {
   BrowserWindow.fromWebContents(event.sender)?.minimize()
 })
@@ -108,10 +152,10 @@ ipcMain.handle('render:mov', async (event, payload = {}) => {
   for (let index = 0; index < frameCount; index += 1) {
     const time = Math.min(duration, index / fps)
     event.sender.send('render:set-time', time)
-    await delay(22)
-    const image = await win.webContents.capturePage(rect)
+    await delay(index === 0 ? 180 : 90)
+    const png = await captureFramePng(win.webContents, rect, payload.renderScale)
     const file = path.join(framesDir, `frame-${String(index).padStart(5, '0')}.png`)
-    await fs.writeFile(file, image.toPNG())
+    await fs.writeFile(file, png)
   }
 
   const output = path.join(outDir, `${sanitizeName(project.name)}.mov`)
@@ -122,7 +166,9 @@ ipcMain.handle('render:mov', async (event, payload = {}) => {
     '-i', inputPattern,
     '-c:v', 'prores_ks',
     '-profile:v', '4',
+    '-vendor', 'apl0',
     '-pix_fmt', 'yuva444p10le',
+    '-bits_per_mb', '8000',
     output,
   ], outDir)
 

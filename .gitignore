@@ -6,5 +6,7 @@ public/inputlag-preview/
 *.mov
 *.mp4
 *.log
+desktop.ini
 .env
 .env.*
+.codegraph/
