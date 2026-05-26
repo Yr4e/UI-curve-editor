@@ -49,6 +49,25 @@ body.render-alpha {
   background: transparent !important;
 }
 
+body.render-alpha .studio-app,
+body.render-alpha .workspace,
+body.render-alpha .studio-center,
+body.render-alpha .preview-panel,
+body.render-alpha .preview-canvas {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+body.render-alpha .topbar,
+body.render-alpha .timeline-panel,
+body.render-alpha .inspector,
+body.render-alpha .section-header,
+body.render-alpha .render-status {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
 button,
 input,
 select {

@@ -80,7 +80,7 @@ const makeProject = ({ name = 'InputLag Project', duration = 6, fps, speed, page
     speed: speed ?? preset?.speed ?? 1,
     page: page ?? preset?.page ?? 'boost',
     sourceUrl: inputLagPreviewUrl,
-    sourceName: 'C:/Users/yr4e/inputlag.ai-main/renderer',
+    sourceName: 'C:/Users/yr4e/Desktop/inputlag.ai-main last ver/renderer',
     sourceFiles: 0,
     baseTransform: base,
     windowTrack: {
